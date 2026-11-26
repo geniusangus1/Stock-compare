@@ -9,32 +9,54 @@ st.title("📈 多檔股票區間報酬率與回撤比較")
 st.caption("資料來源：Yahoo Finance（已啟用還原股價 auto_adjust 反映含息報酬）")
 
 # ==========================================
-# 🛠️ 1. 預設常用 ETF 快捷清單與輸入區
+# 🛠️ 1. 分類常用 ETF 快捷清單與輸入區
 # ==========================================
-PRESET_ETFS = {
-    "00961.TW (FT臺灣永續高息)": "00961.TW",
-    "0050.TW (元大台灣50)": "0050.TW",
-    "006208.TW (富邦台50)": "006208.TW",
-    "0056.TW (元大高股息)": "0056.TW",
-    "00878.TW (國泰永續高股息)": "00878.TW",
-    "00919.TW (群益台灣精選高息)": "00919.TW",
-    "00929.TW (復華台灣科技優息)": "00929.TW",
-    "00713.TW (元大台灣高息低波)": "00713.TW",
-    "VOO (Vanguard 標普500)": "VOO",
-    "QQQ (Invesco 納斯達克100)": "QQQ",
-    "VT (Vanguard 全世界股票)": "VT",
-}
+MARKET_CAP_ETFS = [
+    "0050.TW", "009816.TW"
+]
 
-selected_labels = st.multiselect(
-    "📌 快速勾選常用 ETF（可複選）",
-    options=list(PRESET_ETFS.keys()),
-    default=["00961.TW (FT臺灣永續高息)", "0050.TW (元大台灣50)"]
-)
+HIGH_DIV_ETFS = [
+    "00918.TW", "00961.TW", "0056.TW", "00878.TW",
+    "00919.TW", "00939.TW", "00701.TW"
+]
+
+ACTIVE_ETFS = [
+    "00400A.TW", "00401A.TW", "00403A.TW", "00404A.TW", "00405A.TW",
+    "00406A.TW", "00407A.TW", "00408A.TW", "00410A.TW", "00413A.TW",
+    "00415A.TW", "00416A.TW", "00418A.TW", "00419A.TW", "00980A.TW",
+    "00981A.TW", "00982A.TW", "00984A.TW", "00985A.TW", "00991A.TW",
+    "00992A.TW", "00993A.TW", "00994A.TW", "00995A.TW", "00996A.TW",
+    "00999A.TW"
+]
+
+st.markdown("**📌 快速勾選常用 ETF（可跨類別複選）**")
+cat_col1, cat_col2, cat_col3 = st.columns(3)
+
+with cat_col1:
+    sel_market = st.multiselect(
+        "📈 市值型",
+        options=MARKET_CAP_ETFS,
+        default=["0050.TW"]
+    )
+
+with cat_col2:
+    sel_div = st.multiselect(
+        "💰 高股息",
+        options=HIGH_DIV_ETFS,
+        default=["00961.TW"]
+    )
+
+with cat_col3:
+    sel_active = st.multiselect(
+        "🎯 主動式",
+        options=ACTIVE_ETFS,
+        default=[]
+    )
 
 custom_tickers_input = st.text_input(
     "✍️ 額外手動輸入其他股號（選填，多檔請用半形逗號 , 隔開）",
     value="",
-    placeholder="例如：2330.TW, AAPL, NVDA",
+    placeholder="例如：2330.TW, VOO, QQQ",
     help="台股上市加 .TW、上櫃加 .TWO，美股直接輸入代號"
 )
 
@@ -74,8 +96,8 @@ with col2:
 # 📊 3. 核心計算與疊圖引擎
 # ==========================================
 if st.button("🚀 開始計算與疊圖比較", type="primary", use_container_width=True):
-    # 合併「快捷勾選」與「手動輸入」的股號，並維持順序去除重複
-    selected_tickers = [PRESET_ETFS[label] for label in selected_labels]
+    # 合併三大分類勾選與手動輸入的股號，並維持順序去除重複
+    selected_tickers = sel_market + sel_div + sel_active
     custom_tickers = [t.strip().upper() for t in custom_tickers_input.split(",") if t.strip()]
     tickers = list(dict.fromkeys(selected_tickers + custom_tickers))
 
@@ -94,7 +116,7 @@ if st.button("🚀 開始計算與疊圖比較", type="primary", use_container_w
                 data = yf.download(ticker, start=start_date, end=fetch_end, auto_adjust=True, progress=False)
 
                 if data.empty:
-                    st.warning(f"⚠️ 找不到 **{ticker}** 的資料，已自動略過（請確認股號或 .TW 後綴）。")
+                    st.warning(f"⚠️ 找不到 **{ticker}** 的資料（可能尚未掛牌或需改用 `.TWO` 上櫃後綴），已自動略過。")
                     continue
 
                 # 處理新版 yfinance MultiIndex 結構
