@@ -72,7 +72,6 @@ quick_range = st.radio(
     horizontal=True
 )
 
-# 根據選擇的快捷按鈕自動計算起始日
 if quick_range == "近一個月":
     default_start = today - datetime.timedelta(days=30)
 elif quick_range == "近一季":
@@ -96,7 +95,6 @@ with col2:
 # 📊 3. 核心計算與疊圖引擎
 # ==========================================
 if st.button("🚀 開始計算與疊圖比較", type="primary", use_container_width=True):
-    # 合併三大分類勾選與手動輸入的股號，並維持順序去除重複
     selected_tickers = sel_market + sel_div + sel_active
     custom_tickers = [t.strip().upper() for t in custom_tickers_input.split(",") if t.strip()]
     tickers = list(dict.fromkeys(selected_tickers + custom_tickers))
@@ -134,11 +132,14 @@ if st.button("🚀 開始計算與疊圖比較", type="primary", use_container_w
                     st.warning(f"⚠️ **{ticker}** 在此區間內的有效交易日不足 2 天，已略過。")
                     continue
 
-                # 取得首尾交易日與價格
-                start_actual_date = series_close.index
-                end_actual_date = series_close.index[-1]
-                start_price = float(series_close.iloc)
-                end_price = float(series_close.iloc[-1])
+                # 改用安全取值方式取得首尾交易日與價格
+                dates_list = series_close.index.tolist()
+                prices_list = series_close.to_numpy().flatten().tolist()
+
+                start_actual_date = dates_list.pop(0)
+                end_actual_date = dates_list.pop(-1)
+                start_price = float(prices_list.pop(0))
+                end_price = float(prices_list.pop(-1))
 
                 # 計算總報酬率 (ROI) 與年化報酬率 (CAGR)
                 roi = (end_price / start_price - 1) * 100
