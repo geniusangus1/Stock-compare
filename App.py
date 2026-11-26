@@ -14,7 +14,7 @@ st.caption("資料來源：Yahoo Finance（已啟用還原股價 auto_adjust 反
 PRESET_ETFS = {
     "00961.TW (FT臺灣永續高息)": "00961.TW",
     "0050.TW (元大台灣50)": "0050.TW",
-    "00918.TW (大華優利高填息30)": "00918.TW",
+    "006208.TW (富邦台50)": "006208.TW",
     "0056.TW (元大高股息)": "0056.TW",
     "00878.TW (國泰永續高股息)": "00878.TW",
     "00919.TW (群益台灣精選高息)": "00919.TW",
@@ -164,66 +164,3 @@ if st.button("🚀 開始計算與疊圖比較", type="primary", use_container_w
             st.caption("註：0% 代表創新高，數值越負代表距離前波高點跌得越深，可比較抗跌與解套速度")
             df_dd_chart = pd.DataFrame(drawdown_series_dict)
             st.line_chart(df_dd_chart)
-
-
-                # 處理新版 yfinance MultiIndex 結構
-                if isinstance(data.columns, pd.MultiIndex):
-                    if 'Close' in data.columns.get_level_values(0):
-                        data = data.loc[:, data.columns.get_level_values(0) == 'Close']
-                        data.columns = ['Close']
-                    elif ticker in data.columns.get_level_values(1):
-                        data = data.xs(ticker, axis=1, level=1)
-
-                series_close = data['Close'] if 'Close' in data.columns else data
-                series_close = series_close.squeeze().dropna()
-
-                if len(series_close) < 2:
-                    st.warning(f"⚠️ **{ticker}** 在此區間內的有效交易日不足 2 天，已略過。")
-                    continue
-
-                # 取得首尾交易日與價格
-                start_actual_date = series_close.index[0]
-                end_actual_date = series_close.index[-1]
-                start_price = float(series_close.iloc[0])
-                end_price = float(series_close.iloc[-1])
-
-                # 計算總報酬率 (ROI) 與年化報酬率 (CAGR)
-                roi = (end_price / start_price - 1) * 100
-                holding_days = (end_actual_date - start_actual_date).days
-                cagr = ((end_price / start_price) ** (365 / holding_days) - 1) * 100 if holding_days > 0 else 0.0
-
-                # 計算最大回撤 (Max Drawdown, MDD)
-                rolling_max = series_close.cummax()
-                drawdown = (series_close - rolling_max) / rolling_max
-                max_drawdown = float(drawdown.min()) * 100
-
-                # 整理成比較表格列
-                summary_list.append({
-                    "股票代號": ticker,
-                    "起始日": start_actual_date.strftime("%Y-%m-%d"),
-                    "起始價": round(start_price, 2),
-                    "結束日": end_actual_date.strftime("%Y-%m-%d"),
-                    "結束價": round(end_price, 2),
-                    "區間總報酬 (%)": round(roi, 2),
-                    "年化報酬 CAGR (%)": round(cagr, 2),
-                    "最大回撤 MDD (%)": round(max_drawdown, 2),
-                    "持有天數": holding_days
-                })
-
-                # 計算每日累積報酬率 (%)，讓所有股票從 0% 起跑方便疊圖
-                cumulative_roi = (series_close / start_price - 1) * 100
-                roi_series_dict[ticker] = cumulative_roi
-
-        # ==========================================
-        # 📈 3. 顯示比較總表與走勢疊圖
-        # ==========================================
-        if summary_list:
-            st.divider()
-            st.subheader("🏆 區間報酬與風險比較總表")
-            df_summary = pd.DataFrame(summary_list)
-            st.dataframe(df_summary, use_container_width=True, hide_index=True)
-
-            st.subheader("📊 累積報酬率走勢疊圖（%）")
-            st.caption("註：所有標的皆以各自區間首日為基準（0%），可直觀比較相對漲跌幅表現")
-            df_chart = pd.DataFrame(roi_series_dict)
-            st.line_chart(df_chart)
