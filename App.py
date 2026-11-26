@@ -1,5 +1,6 @@
 import datetime
 import pandas as pd
+import plotly.graph_objects as go
 import streamlit as st
 import yfinance as yf
 
@@ -92,7 +93,53 @@ with col2:
     end_date = st.date_input("終止日期", value=today)
 
 # ==========================================
-# 📊 3. 核心計算與疊圖引擎
+# 📊 3. 互動式圖表繪製函式（支援連續滑動準心）
+# ==========================================
+def build_interactive_chart(df, y_title):
+    fig = go.Figure()
+    for col in df.columns:
+        fig.add_trace(go.Scatter(
+            x=df.index,
+            y=df[col],
+            mode="lines",
+            name=col,
+            line=dict(width=2.2),
+            hovertemplate="%{y:+.2f}%"
+        ))
+
+    fig.update_layout(
+        hovermode="x unified",  # 關鍵設定：滑動時垂直準心同步顯示所有股票數據
+        xaxis=dict(
+            title="日期",
+            tickformat="%Y-%m-%d",
+            showspikes=True,
+            spikemode="across",
+            spikesnap="cursor",
+            spikethickness=1,
+            spikedash="dot",
+            fixedrange=True  # 鎖定縮放，確保手機手指左右滑動順暢不誤觸
+        ),
+        yaxis=dict(
+            title=y_title,
+            ticksuffix="%",
+            fixedrange=True
+        ),
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.02,
+            xanchor="left",
+            x=0
+        ),
+        margin=dict(l=10, r=10, t=40, b=10),
+        height=400
+    )
+    # 加上 0% 基準參考線
+    fig.add_hline(y=0, line_width=1, line_dash="dash", line_color="gray", opacity=0.5)
+    return fig
+
+# ==========================================
+# 🚀 4. 核心計算與疊圖引擎
 # ==========================================
 if st.button("🚀 開始計算與疊圖比較", type="primary", use_container_width=True):
     selected_tickers = sel_market + sel_div + sel_active
@@ -132,7 +179,7 @@ if st.button("🚀 開始計算與疊圖比較", type="primary", use_container_w
                     st.warning(f"⚠️ **{ticker}** 在此區間內的有效交易日不足 2 天，已略過。")
                     continue
 
-                # 改用安全取值方式取得首尾交易日與價格
+                # 安全取值取得首尾交易日與價格
                 dates_list = series_close.index.tolist()
                 prices_list = series_close.to_numpy().flatten().tolist()
 
@@ -170,7 +217,7 @@ if st.button("🚀 開始計算與疊圖比較", type="primary", use_container_w
                 drawdown_series_dict[ticker] = drawdown_pct
 
         # ==========================================
-        # 📈 4. 顯示比較總表、累積報酬疊圖與水下圖
+        # 📈 5. 顯示比較總表、累積報酬疊圖與水下圖
         # ==========================================
         if summary_list:
             st.divider()
@@ -179,11 +226,11 @@ if st.button("🚀 開始計算與疊圖比較", type="primary", use_container_w
             st.dataframe(df_summary, use_container_width=True, hide_index=True)
 
             st.subheader("📊 累積報酬率走勢疊圖（%）")
-            st.caption("註：所有標的皆以各自區間首日為基準（0%），可直觀比較相對漲跌幅表現")
+            st.caption("💡 提示：手指點在圖上並左右滑動，即可同步檢視各檔標的當日累積報酬率")
             df_roi_chart = pd.DataFrame(roi_series_dict)
-            st.line_chart(df_roi_chart)
+            st.plotly_chart(build_interactive_chart(df_roi_chart, "累積報酬率 (%)"), use_container_width=True, config={"displayModeBar": False})
 
             st.subheader("🌊 回撤走勢水下圖（Underwater Plot, %）")
-            st.caption("註：0% 代表創新高，數值越負代表距離前波高點跌得越深，可比較抗跌與解套速度")
+            st.caption("💡 提示：0% 代表創新高，手指左右滑動可查看各檔標的在特定日期的回檔深度")
             df_dd_chart = pd.DataFrame(drawdown_series_dict)
-            st.line_chart(df_dd_chart)
+            st.plotly_chart(build_interactive_chart(df_dd_chart, "回撤幅度 (%)"), use_container_width=True, config={"displayModeBar": False})
