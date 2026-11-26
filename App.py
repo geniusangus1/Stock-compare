@@ -203,18 +203,23 @@ if st.session_state.calc_results is not None:
         value=available_dates[-1]
     )
 
-    # 即時顯示該日期所有股票的累積報酬與回撤卡片
+    # 即時顯示該日期所有股票的累積報酬與距前高狀態卡片
     row_roi = df_roi.loc[selected_date]
     row_dd = df_dd.loc[selected_date]
     cols = st.columns(min(len(df_roi.columns), 3))
     for idx, ticker in enumerate(df_roi.columns):
         val_roi = row_roi[ticker]
         val_dd = row_dd[ticker]
+        if pd.notna(val_dd):
+            dd_label = "創波段新高 (0%)" if round(val_dd, 2) == 0 else f"距前高 {val_dd:.2f}%"
+        else:
+            dd_label = ""
+
         with cols[idx % 3]:
             st.metric(
                 label=f"{ticker} ({selected_date})",
                 value=f"{val_roi:+.2f}%" if pd.notna(val_roi) else "無資料",
-                delta=f"當日回撤 {val_dd:.2f}%" if pd.notna(val_dd) else "",
+                delta=dd_label,
                 delta_color="off"
             )
 
@@ -231,7 +236,6 @@ if st.session_state.calc_results is not None:
                 hovertemplate="%{y:+.2f}%"
             ))
         fig.add_hline(y=0, line_width=1, line_dash="dash", line_color="gray", opacity=0.5)
-        # 加上對應滑桿日期的紅色垂直準心線
         fig.add_vline(x=active_date, line_width=1.5, line_dash="solid", line_color="#FF4B4B")
         fig.update_layout(
             hovermode="x unified",
