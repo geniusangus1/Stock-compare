@@ -3,18 +3,39 @@ import pandas as pd
 import streamlit as st
 import yfinance as yf
 
-st.set_page_config(page_title="多檔股票報酬率疊圖比較", page_icon="📈", layout="centered")
+st.set_page_config(page_title="多檔股票報酬率與風險比較", page_icon="📈", layout="centered")
 
-st.title("📈 多檔股票區間報酬率疊圖比較")
+st.title("📈 多檔股票區間報酬率與回撤比較")
 st.caption("資料來源：Yahoo Finance（已啟用還原股價 auto_adjust 反映含息報酬）")
 
 # ==========================================
-# 🛠️ 1. 網頁互動輸入區
+# 🛠️ 1. 預設常用 ETF 快捷清單與輸入區
 # ==========================================
-tickers_input = st.text_input(
-    "輸入股號（多檔請用半形逗號 , 隔開）",
-    value="00961.TW, 0050.TW",
-    help="台股上市加 .TW、上櫃加 .TWO，美股直接輸入代號（如 AAPL, NVDA）"
+PRESET_ETFS = {
+    "00961.TW (FT臺灣永續高息)": "00961.TW",
+    "0050.TW (元大台灣50)": "0050.TW",
+    "00918.TW (大華優利高填息30)": "00918.TW",
+    "0056.TW (元大高股息)": "0056.TW",
+    "00878.TW (國泰永續高股息)": "00878.TW",
+    "00919.TW (群益台灣精選高息)": "00919.TW",
+    "00929.TW (復華台灣科技優息)": "00929.TW",
+    "00713.TW (元大台灣高息低波)": "00713.TW",
+    "VOO (Vanguard 標普500)": "VOO",
+    "QQQ (Invesco 納斯達克100)": "QQQ",
+    "VT (Vanguard 全世界股票)": "VT",
+}
+
+selected_labels = st.multiselect(
+    "📌 快速勾選常用 ETF（可複選）",
+    options=list(PRESET_ETFS.keys()),
+    default=["00961.TW (FT臺灣永續高息)", "0050.TW (元大台灣50)"]
+)
+
+custom_tickers_input = st.text_input(
+    "✍️ 額外手動輸入其他股號（選填，多檔請用半形逗號 , 隔開）",
+    value="",
+    placeholder="例如：2330.TW, AAPL, NVDA",
+    help="台股上市加 .TW、上櫃加 .TWO，美股直接輸入代號"
 )
 
 col1, col2 = st.columns(2)
@@ -27,11 +48,13 @@ with col2:
 # 📊 2. 核心計算與疊圖引擎
 # ==========================================
 if st.button("🚀 開始計算與疊圖比較", type="primary", use_container_width=True):
-    # 解析並清理使用者輸入的多個股號
-    tickers = [t.strip().upper() for t in tickers_input.split(",") if t.strip()]
+    # 合併「快捷勾選」與「手動輸入」的股號，並維持順序去除重複
+    selected_tickers = [PRESET_ETFS[label] for label in selected_labels]
+    custom_tickers = [t.strip().upper() for t in custom_tickers_input.split(",") if t.strip()]
+    tickers = list(dict.fromkeys(selected_tickers + custom_tickers))
 
     if not tickers:
-        st.warning("⚠️ 請至少輸入一檔股票代號！")
+        st.warning("⚠️ 請至少勾選或輸入一檔股票代號！")
     elif start_date >= end_date:
         st.error("⚠️ 終止日期必須晚於起始日期！")
     else:
@@ -73,6 +96,11 @@ if st.button("🚀 開始計算與疊圖比較", type="primary", use_container_w
                 holding_days = (end_actual_date - start_actual_date).days
                 cagr = ((end_price / start_price) ** (365 / holding_days) - 1) * 100 if holding_days > 0 else 0.0
 
+                # 計算最大回撤 (Max Drawdown, MDD)
+                rolling_max = series_close.cummax()
+                drawdown = (series_close - rolling_max) / rolling_max
+                max_drawdown = float(drawdown.min()) * 100
+
                 # 整理成比較表格列
                 summary_list.append({
                     "股票代號": ticker,
@@ -82,6 +110,7 @@ if st.button("🚀 開始計算與疊圖比較", type="primary", use_container_w
                     "結束價": round(end_price, 2),
                     "區間總報酬 (%)": round(roi, 2),
                     "年化報酬 CAGR (%)": round(cagr, 2),
+                    "最大回撤 MDD (%)": round(max_drawdown, 2),
                     "持有天數": holding_days
                 })
 
@@ -94,7 +123,7 @@ if st.button("🚀 開始計算與疊圖比較", type="primary", use_container_w
         # ==========================================
         if summary_list:
             st.divider()
-            st.subheader("🏆 區間報酬率比較總表")
+            st.subheader("🏆 區間報酬與風險比較總表")
             df_summary = pd.DataFrame(summary_list)
             st.dataframe(df_summary, use_container_width=True, hide_index=True)
 
@@ -102,4 +131,3 @@ if st.button("🚀 開始計算與疊圖比較", type="primary", use_container_w
             st.caption("註：所有標的皆以各自區間首日為基準（0%），可直觀比較相對漲跌幅表現")
             df_chart = pd.DataFrame(roi_series_dict)
             st.line_chart(df_chart)
-          
