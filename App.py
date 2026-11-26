@@ -2,6 +2,7 @@ import datetime
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
+import streamlit.components.v1 as components
 import yfinance as yf
 
 st.set_page_config(page_title="多檔股票報酬率與風險比較", page_icon="📈", layout="centered")
@@ -69,7 +70,7 @@ today = datetime.date.today()
 quick_range = st.radio(
     "⏱️ 快速選擇回測區間",
     options=["近一個月", "近一季", "近半年", "近一年", "今年以來", "自訂區間"],
-    index=4,  # 預設選取「今年以來」
+    index=4,
     horizontal=True
 )
 
@@ -93,14 +94,14 @@ with col2:
     end_date = st.date_input("終止日期", value=today)
 
 # ==========================================
-# 📊 3. 互動式圖表繪製函式（支援連續滑動準心）
+# 📊 3. 互動式圖表繪製函式（支援手機觸控連續滑動）
 # ==========================================
-def build_interactive_chart(df, y_title):
+def render_touch_chart(df, y_title, chart_id):
     fig = go.Figure()
     for col in df.columns:
         fig.add_trace(go.Scatter(
-            x=df.index,
-            y=df[col],
+            x=df.index.strftime("%Y-%m-%d").tolist(),
+            y=df[col].round(2).tolist(),
             mode="lines",
             name=col,
             line=dict(width=2.2),
@@ -108,16 +109,16 @@ def build_interactive_chart(df, y_title):
         ))
 
     fig.update_layout(
-        hovermode="x unified",  # 關鍵設定：滑動時垂直準心同步顯示所有股票數據
+        hovermode="x unified",
+        dragmode=False,  # 關閉預設拖曳平移，避免吃掉手機滑動手勢
         xaxis=dict(
-            title="日期",
-            tickformat="%Y-%m-%d",
+            title="",
             showspikes=True,
             spikemode="across",
             spikesnap="cursor",
-            spikethickness=1,
+            spikethickness=1.2,
             spikedash="dot",
-            fixedrange=True  # 鎖定縮放，確保手機手指左右滑動順暢不誤觸
+            fixedrange=True
         ),
         yaxis=dict(
             title=y_title,
@@ -131,12 +132,43 @@ def build_interactive_chart(df, y_title):
             xanchor="left",
             x=0
         ),
-        margin=dict(l=10, r=10, t=40, b=10),
-        height=400
+        margin=dict(l=10, r=10, t=40, b=20),
+        height=380
     )
-    # 加上 0% 基準參考線
     fig.add_hline(y=0, line_width=1, line_dash="dash", line_color="gray", opacity=0.5)
-    return fig
+
+    # 將 Plotly 轉為獨立 HTML 並注入手機觸控連續滑動橋接腳本
+    html_str = fig.to_html(include_plotlyjs="cdn", full_html=False, config={"displayModeBar": False}, div_id=chart_id)
+    touch_bridge_html = f"""
+    <div id="wrapper_{chart_id}" style="touch-action: pan-y;">
+        {html_str}
+    </div>
+    <script>
+        (function() {{
+            const wrapper = document.getElementById("wrapper_{chart_id}");
+            function forwardTouch(e) {{
+                if (!e.touches || e.touches.length !== 1) return;
+                const touch = e.touches[0];
+                const plotArea = wrapper.querySelector(".nsewdrag");
+                if (!plotArea) return;
+                const rect = plotArea.getBoundingClientRect();
+                if (touch.clientX >= rect.left && touch.clientX <= rect.right &&
+                    touch.clientY >= rect.top && touch.clientY <= rect.bottom) {{
+                    const mouseEvent = new MouseEvent("mousemove", {{
+                        bubbles: true,
+                        cancelable: true,
+                        clientX: touch.clientX,
+                        clientY: touch.clientY
+                    }});
+                    plotArea.dispatchEvent(mouseEvent);
+                }}
+            }}
+            wrapper.addEventListener("touchstart", forwardTouch, {{passive: true}});
+            wrapper.addEventListener("touchmove", forwardTouch, {{passive: true}});
+        }})();
+    </script>
+    """
+    components.html(touch_bridge_html, height=400)
 
 # ==========================================
 # 🚀 4. 核心計算與疊圖引擎
@@ -164,7 +196,6 @@ if st.button("🚀 開始計算與疊圖比較", type="primary", use_container_w
                     st.warning(f"⚠️ 找不到 **{ticker}** 的資料（可能尚未掛牌或需改用 `.TWO` 上櫃後綴），已自動略過。")
                     continue
 
-                # 處理新版 yfinance MultiIndex 結構
                 if isinstance(data.columns, pd.MultiIndex):
                     if 'Close' in data.columns.get_level_values(0):
                         data = data.loc[:, data.columns.get_level_values(0) == 'Close']
@@ -179,7 +210,6 @@ if st.button("🚀 開始計算與疊圖比較", type="primary", use_container_w
                     st.warning(f"⚠️ **{ticker}** 在此區間內的有效交易日不足 2 天，已略過。")
                     continue
 
-                # 安全取值取得首尾交易日與價格
                 dates_list = series_close.index.tolist()
                 prices_list = series_close.to_numpy().flatten().tolist()
 
@@ -188,17 +218,14 @@ if st.button("🚀 開始計算與疊圖比較", type="primary", use_container_w
                 start_price = float(prices_list.pop(0))
                 end_price = float(prices_list.pop(-1))
 
-                # 計算總報酬率 (ROI) 與年化報酬率 (CAGR)
                 roi = (end_price / start_price - 1) * 100
                 holding_days = (end_actual_date - start_actual_date).days
                 cagr = ((end_price / start_price) ** (365 / holding_days) - 1) * 100 if holding_days > 0 else 0.0
 
-                # 計算每日回撤 (%) 與最大回撤 (Max Drawdown, MDD)
                 rolling_max = series_close.cummax()
                 drawdown_pct = ((series_close - rolling_max) / rolling_max) * 100
                 max_drawdown = float(drawdown_pct.min())
 
-                # 整理成比較表格列
                 summary_list.append({
                     "股票代號": ticker,
                     "起始日": start_actual_date.strftime("%Y-%m-%d"),
@@ -211,7 +238,6 @@ if st.button("🚀 開始計算與疊圖比較", type="primary", use_container_w
                     "持有天數": holding_days
                 })
 
-                # 儲存每日累積報酬率與每日回撤序列
                 cumulative_roi = (series_close / start_price - 1) * 100
                 roi_series_dict[ticker] = cumulative_roi
                 drawdown_series_dict[ticker] = drawdown_pct
@@ -226,11 +252,11 @@ if st.button("🚀 開始計算與疊圖比較", type="primary", use_container_w
             st.dataframe(df_summary, use_container_width=True, hide_index=True)
 
             st.subheader("📊 累積報酬率走勢疊圖（%）")
-            st.caption("💡 提示：手指點在圖上並左右滑動，即可同步檢視各檔標的當日累積報酬率")
+            st.caption("💡 提示：手指按住圖表左右連續滑動，即可即時檢視各檔標的當日累積報酬率")
             df_roi_chart = pd.DataFrame(roi_series_dict)
-            st.plotly_chart(build_interactive_chart(df_roi_chart, "累積報酬率 (%)"), use_container_width=True, config={"displayModeBar": False})
+            render_touch_chart(df_roi_chart, "累積報酬率 (%)", "roi_chart")
 
             st.subheader("🌊 回撤走勢水下圖（Underwater Plot, %）")
-            st.caption("💡 提示：0% 代表創新高，手指左右滑動可查看各檔標的在特定日期的回檔深度")
+            st.caption("💡 提示：0% 代表創新高，手指按住圖表左右連續滑動可查看當日回檔深度")
             df_dd_chart = pd.DataFrame(drawdown_series_dict)
-            st.plotly_chart(build_interactive_chart(df_dd_chart, "回撤幅度 (%)"), use_container_width=True, config={"displayModeBar": False})
+            render_touch_chart(df_dd_chart, "回撤幅度 (%)", "dd_chart")
