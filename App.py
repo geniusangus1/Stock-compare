@@ -221,5 +221,8 @@ if st.session_state.calc_results is not None:
     st.subheader("📊 累積報酬率走勢疊圖（%）")
     st.plotly_chart(build_chart(df_roi, "累積報酬率 (%)", selected_date), use_container_width=True, config={"displayModeBar": False})
 
-st.subheader("🌊 回撤走勢水下圖（Underwater Plot, %）")
-st.plotly_chart(build_chart(df_dd, "回撤幅度 (%)", selected_date), use_container_width=True, config={"displayModeBar": False})
+    st.subheader("📊 累積報酬率走勢疊圖（%）")
+    st.plotly_chart(build_chart(df_roi, "累積報酬率 (%)", selected_date), use_container_width=True, config={"displayModeBar": False})
+
+    st.subheader("🌊 回撤走勢水下圖（Underwater Plot, %）")
+    st.plotly_chart(build_chart(df_dd, "回撤幅度 (%)", selected_date), use_container_width=True, config={"displayModeBar": False})
