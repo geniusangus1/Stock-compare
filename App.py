@@ -2,12 +2,13 @@ import datetime
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
+import requests
 import streamlit as st
 import yfinance as yf
 
 st.set_page_config(page_title="多檔 ETF 報酬率與風險比較", page_icon="📈", layout="centered")
 st.title("📈 多檔 ETF 區間報酬率與回撤比較")
-st.caption("資料來源：Yahoo Finance（已啟用還原股價 auto_adjust 反映含息報酬）")
+st.caption("資料來源：Yahoo Finance（含息還原股價）＆ 臺灣證券交易所公開配息資料")
 
 if "calc_results" not in st.session_state:
     st.session_state.calc_results = None
@@ -16,29 +17,9 @@ if "calc_results" not in st.session_state:
 # 🛠️ 1. ETF 分類清單（可在下方字典自行補充中文名稱）
 # ==========================================
 ETF_NAMES = {
-    "0050.TW": "元大台灣50", "009816.TW": "凱基台灣TOP50",
-    "00918.TW": "大華優利高填息30", "00961.TW": "FT臺灣永續高息",
-    "0056.TW": "元大高股息", "00878.TW": "國泰永續高股息",
-    "00919.TW": "群益台灣精選高息", "00939.TW": "統一台灣高息動能",
-    "00701.TW": "國泰股利精選30", "00915.TW": "凱基優選高股息30",
-    "00938.TW": "凱基優選30", "00713.TW": "元大台灣高息低波",
-    "00907.TW": "永豐優息存股", "00731.TW": "復華富時高息低波",
-    "00400A.TW": "主動國泰動能高息", "00401A.TW": "主動摩根台灣鑫收",
-    "00403A.TW": "主動統一升級50", "00404A.TW": "主動聯博動能50",
-    "00405A.TW": "主動富邦台灣龍耀", "00406A.TW": "主動中信台灣收益",
-    "00407A.TW": "主動凱基台灣", "00408A.TW": "主動第一金優股息",
-    "00410A.TW": "主動永豐科技趨勢", "00413A.TW": "主動玉山關鍵科技",
-    "00415A.TW": "主動群益核心50", "00416A.TW": "主動台新臺灣中小",
-    "00418A.TW": "主動復華台灣新星", "00419A.TW": "主動施羅德AI台股",
-    "00980A.TW": "主動野村臺灣優選", "00981A.TW": "主動統一台股增長",
-    "00982A.TW": "主動群益台灣強棒", "00984A.TW": "主動安聯台灣高息",
-    "00985A.TW": "主動野村台灣50", 
-"00987A.TW": "	主動台新優勢成長", "00991A.TW": "主動復華未來50",
-    "00992A.TW": "主動群益科技創新", "00993A.TW": "主動安聯台灣",
-    "00994A.TW": "主動第一金台股優", "00995A.TW": "主動中信台灣卓越",
-    "00996A.TW": "主動兆豐台灣豐收", "00999A.TW": "主動野村臺灣高息",
+    "0050.TW": "元大台灣50",
+    "00961.TW": "FT臺灣永續高息",
 }
-
 
 def format_label(ticker):
     code = ticker.replace(".TW", "").replace(".TWO", "")
@@ -58,6 +39,58 @@ ACTIVE_ETFS = [
     "00996A.TW", "00999A.TW"
 ]
 
+# ==========================================
+# 🌐 2. 串接證交所公開 API 計算近 12 個月 54C 佔比
+# ==========================================
+@st.cache_data(ttl=86400)
+def fetch_twse_54c_map():
+    """從證交所公開 API 抓取近 12 個月 ETF 收益分配組成並計算加權 54C 佔比"""
+    today_dt = datetime.date.today()
+    start_dt = today_dt - datetime.timedelta(days=365)
+    url = (
+        f"https://twse.com.tw"
+        f"?startDate={start_dt.strftime('%Y%m%d')}&endDate={today_dt.strftime('%Y%m%d')}&response=json"
+    )
+    headers = {"User-Agent": "Mozilla/5.0"}
+    ratio_map = {}
+    try:
+        resp = requests.get(url, headers=headers, timeout=8)
+        js = resp.json()
+        fields = js.get("fields", [])
+        rows = js.get("data", [])
+        if not fields or not rows:
+            return ratio_map
+
+        # 動態定位「代號」、「分配金額」與「股利所得(54C)占比」欄位索引
+        idx_code = next((i for i, f in enumerate(fields) if "代號" in f), 0)
+        idx_amt = next((i for i, f in enumerate(fields) if "分配金額" in f or "每單位" in f), -1)
+        idx_54c = next((i for i, f in enumerate(fields) if "54C" in f or "股利" in f), -1)
+        if idx_amt == -1 or idx_54c == -1:
+            return ratio_map
+
+        acc = {}
+        for r in rows:
+            code = str(r[idx_code]).strip()
+            try:
+                amt = float(str(r[idx_amt]).replace(",", "").strip())
+                pct_str = str(r[idx_54c]).replace("%", "").replace(",", "").strip()
+                if pct_str in ("", "-", "--", "不適用"):
+                    continue
+                pct = float(pct_str)
+                if code not in acc:
+                    acc[code] = [0.0, 0.0]
+                acc[code][0] += amt * pct
+                acc[code][1] += amt
+            except ValueError:
+                continue
+
+        for code, (weighted_sum, total_amt) in acc.items():
+            if total_amt > 0:
+                ratio_map[code] = round(weighted_sum / total_amt, 2)
+    except Exception:
+        pass
+    return ratio_map
+
 st.markdown("**📌 快速勾選常用 ETF（可跨類別複選）**")
 cat_col1, cat_col2, cat_col3 = st.columns(3)
 with cat_col1:
@@ -70,7 +103,7 @@ with cat_col3:
 custom_tickers_input = st.text_input("✍️ 額外手動輸入其他股號（多檔用半形逗號 , 隔開）", placeholder="例如：2330.TW, VOO, QQQ")
 
 # ==========================================
-# 📅 2. 快捷時間區間按鈕與日曆選擇器
+# 📅 3. 快捷時間區間按鈕與日曆選擇器
 # ==========================================
 today = datetime.date.today()
 quick_range = st.radio("⏱️ 快速選擇回測區間", ["近一個月", "近一季", "近半年", "近一年", "今年以來", "自訂區間"], index=4, horizontal=True)
@@ -85,7 +118,7 @@ with col2:
     end_date = st.date_input("終止日期", value=today)
 
 # ==========================================
-# 🚀 3. 核心計算引擎
+# 🚀 4. 核心計算引擎
 # ==========================================
 if st.button("🚀 開始計算與疊圖比較", type="primary", use_container_width=True):
     selected_tickers = sel_market + sel_div + sel_active
@@ -101,9 +134,12 @@ if st.button("🚀 開始計算與疊圖比較", type="primary", use_container_w
         summary_list, roi_series_dict, drawdown_series_dict = [], {}, {}
         rf_rate = 0.015
 
-        with st.spinner("📡 正在從 Yahoo Finance 抓取歷史資料..."):
+        with st.spinner("📡 正在抓取股價與證交所 54C 配息組成資料..."):
+            twse_54c_dict = fetch_twse_54c_map()
+
             for ticker in tickers:
                 display_name = format_label(ticker)
+                clean_code = ticker.replace(".TW", "").replace(".TWO", "")
                 data = yf.download(ticker, start=start_date, end=fetch_end, auto_adjust=True, progress=False)
 
                 if data.empty:
@@ -146,6 +182,9 @@ if st.button("🚀 開始計算與疊圖比較", type="primary", use_container_w
                 max_drawdown = float(drawdown_pct.min())
                 calmar = (cagr / abs(max_drawdown)) if max_drawdown < 0 else 0.0
 
+                val_54c = twse_54c_dict.get(clean_code, None)
+                str_54c = f"{val_54c:.2f}%" if val_54c is not None else "—"
+
                 summary_list.append({
                     "ETF": display_name,
                     "起始日": start_actual_date.strftime("%Y-%m-%d"),
@@ -157,7 +196,8 @@ if st.button("🚀 開始計算與疊圖比較", type="primary", use_container_w
                     "波動度 (%)": round(ann_vol, 2),
                     "夏普 Sharpe": round(sharpe, 2),
                     "索提諾 Sortino": round(sortino, 2),
-                    "卡瑪 Calmar": round(calmar, 2)
+                    "卡瑪 Calmar": round(calmar, 2),
+                    "近1年54C佔比": str_54c
                 })
 
                 roi_series_dict[display_name] = (series_close / start_price - 1) * 100
@@ -169,59 +209,52 @@ if st.button("🚀 開始計算與疊圖比較", type="primary", use_container_w
             st.session_state.calc_results = {"summary": pd.DataFrame(summary_list), "roi": df_roi, "dd": df_dd}
 
 # ==========================================
-# 📈 4. 顯示結果、頒獎台、指標說明與滑桿查價器
+# 📈 5. 顯示結果、頒獎台、指標說明與滑桿查價器
 # ==========================================
+def build_chart(df, y_title, active_date):
+    fig = go.Figure()
+    for col in df.columns:
+        fig.add_trace(go.Scatter(x=df.index, y=df[col], mode="lines", name=col, line=dict(width=2.5), hovertemplate="%{y:+.2f}%"))
+    fig.add_hline(y=0, line_width=1, line_dash="dash", line_color="gray", opacity=0.5)
+    fig.add_vline(x=active_date, line_width=1.5, line_dash="solid", line_color="#FF4B4B")
+    fig.update_layout(
+        hovermode="x unified", xaxis=dict(title="", fixedrange=True), yaxis=dict(title=y_title, ticksuffix="%", fixedrange=True),
+legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0), margin=dict(l=10, r=10, t=35, b=10), height=360
+)
+return fig
 if st.session_state.calc_results is not None:
-    res = st.session_state.calc_results
-    df_summary, df_roi, df_dd = res["summary"], res["roi"], res["dd"]
-
-    st.divider()
-    if len(df_summary) >= 2:
-        best_roi = df_summary.loc[df_summary["總報酬 (%)"].idxmax()]
-        best_mdd = df_summary.loc[df_summary["最大回撤 (%)"].idxmax()]
-        best_shp = df_summary.loc[df_summary["夏普 Sharpe"].idxmax()]
-        w1, w2, w3 = st.columns(3)
-        w1.metric("🥇 區間報酬王", best_roi["ETF"], f"{best_roi['總報酬 (%)']:+.2f}%")
-        w2.metric("🛡️ 區間抗跌王", best_mdd["ETF"], f"MDD {best_mdd['最大回撤 (%)']:.2f}%", delta_color="off")
-        w3.metric("⚖️ CP值之王 (Sharpe)", best_shp["ETF"], f"{best_shp['夏普 Sharpe']:.2f}")
-
-    st.subheader("🏆 區間報酬與風險比較總表")
-    st.dataframe(df_summary, use_container_width=True, hide_index=True)
-
-    with st.expander("📖 指標公式與判讀說明（Sharpe / Sortino / Calmar 怎麼看？）"):
-        st.markdown("""
-        * **夏普比率 (Sharpe)**：`(年化平均報酬 - 1.5%) / 年化總波動度` — 衡量每單位「總波動」換到的超額報酬，適合當第一道通用篩選（大於 1 屬優秀）。
-        * **索提諾比率 (Sortino)**：`(年化平均報酬 - 1.5%) / 年化下檔波動度` — 只懲罰「下跌」波動、不把大漲算成風險，適合評估飆漲快或高股息抗跌標的。
-        * **卡瑪比率 (Calmar)**：`年化報酬 CAGR / |最大回撤 MDD|` — 衡量承受「最痛那一刀虧損」所換來的年化報酬，越高代表抗跌且解套快。
-        """)
-
-    st.divider()
-    st.subheader("🔍 大拇指連續滑動查價器")
-    available_dates = df_roi.index.tolist()
-    selected_date = st.select_slider("👈 左右拖曳滑桿，即時連動下方圖表：", options=available_dates, value=available_dates[-1])
-
-    row_roi, row_dd = df_roi.loc[selected_date], df_dd.loc[selected_date]
-    cols = st.columns(min(len(df_roi.columns), 3))
-    for idx, label_name in enumerate(df_roi.columns):
-        val_roi, val_dd = row_roi[label_name], row_dd[label_name]
-        dd_label = ("創波段新高 (0%)" if round(val_dd, 2) == 0 else f"距前高 {val_dd:.2f}%") if pd.notna(val_dd) else ""
-        with cols[idx % 3]:
-            st.metric(label=f"{label_name} ({selected_date})", value=f"{val_roi:+.2f}%" if pd.notna(val_roi) else "無資料", delta=dd_label, delta_color="off")
-
-    def build_chart(df, y_title, active_date):
-        fig = go.Figure()
-        for col in df.columns:
-            fig.add_trace(go.Scatter(x=df.index, y=df[col], mode="lines", name=col, line=dict(width=2.5), hovertemplate="%{y:+.2f}%"))
-        fig.add_hline(y=0, line_width=1, line_dash="dash", line_color="gray", opacity=0.5)
-        fig.add_vline(x=active_date, line_width=1.5, line_dash="solid", line_color="#FF4B4B")
-        fig.update_layout(
-            hovermode="x unified", xaxis=dict(title="", fixedrange=True), yaxis=dict(title=y_title, ticksuffix="%", fixedrange=True),
-            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0), margin=dict(l=10, r=10, t=35, b=10), height=360
-        )
-        return fig
-
-    st.subheader("📊 累積報酬率走勢疊圖（%）")
-    st.plotly_chart(build_chart(df_roi, "累積報酬率 (%)", selected_date), use_container_width=True, config={"displayModeBar": False})
-
+res = st.session_state.calc_results
+df_summary, df_roi, df_dd = res["summary"], res["roi"], res["dd"]
+st.divider()
+if len(df_summary) >= 2:
+best_roi = df_summary.loc[df_summary["總報酬 (%)"].idxmax()]
+best_mdd = df_summary.loc[df_summary["最大回撤 (%)"].idxmax()]
+best_shp = df_summary.loc[df_summary["夏普 Sharpe"].idxmax()]
+w1, w2, w3 = st.columns(3)
+w1.metric("🥇 區間報酬王", best_roi["ETF"], f"{best_roi['總報酬 (%)']:+.2f}%")
+w2.metric("🛡️ 區間抗跌王", best_mdd["ETF"], f"MDD {best_mdd['最大回撤 (%)']:.2f}%", delta_color="off")
+w3.metric("⚖️ CP值之王 (Sharpe)", best_shp["ETF"], f"{best_shp['夏普 Sharpe']:.2f}")
+st.subheader("🏆 區間報酬與風險比較總表")
+st.dataframe(df_summary, use_container_width=True, hide_index=True)
+with st.expander("📖 指標公式與判讀說明（Sharpe / Sortino / Calmar / 54C 怎麼看？）"):
+st.markdown("""
+* 夏普比率 (Sharpe)：(年化平均報酬 - 1.5%) / 年化總波動度 — 衡量每單位「總波動」換到的超額報酬，適合當第一道通用篩選（大於 1 屬優秀）。
+* 索提諾比率 (Sortino)：(年化平均報酬 - 1.5%) / 年化下檔波動度 — 只懲罰「下跌」波動、不把大漲算成風險，適合評估飆漲快或高股息抗跌標的。
+* 卡瑪比率 (Calmar)：年化報酬 CAGR / |最大回撤 MDD| — 衡量承受「最痛那一刀虧損」所換來的年化報酬，越高代表抗跌且解套快。
+* 近1年54C佔比：自動向臺灣證券交易所抓取近 365 天除息公告之「股利或盈餘所得 (54C)」占比，並依每次配息金額加權平均（尚未配息或無資料顯示 —）。
+""")
+st.divider()
+st.subheader("🔍 大拇指連續滑動查價器")
+available_dates = df_roi.index.tolist()
+selected_date = st.select_slider("👈 左右拖曳滑桿，即時連動下方圖表：", options=available_dates, value=available_dates[-1])
+row_roi, row_dd = df_roi.loc[selected_date], df_dd.loc[selected_date]
+cols = st.columns(min(len(df_roi.columns), 3))
+for idx, label_name in enumerate(df_roi.columns):
+val_roi, val_dd = row_roi[label_name], row_dd[label_name]
+dd_label = ("創波段新高 (0%)" if round(val_dd, 2) == 0 else f"距前高 {val_dd:.2f}%") if pd.notna(val_dd) else ""
+with cols[idx % 3]:
+st.metric(label=f"{label_name} ({selected_date})", value=f"{val_roi:+.2f}%" if pd.notna(val_roi) else "無資料", delta=dd_label, delta_color="off")
+st.subheader("📊 累積報酬率走勢疊圖（%）")
+st.plotly_chart(build_chart(df_roi, "累積報酬率 (%)", selected_date), use_container_width=True, config={"displayModeBar": False})
 st.subheader("🌊 回撤走勢水下圖（Underwater Plot, %）")
 st.plotly_chart(build_chart(df_dd, "回撤幅度 (%)", selected_date), use_container_width=True, config={"displayModeBar": False})
