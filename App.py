@@ -16,26 +16,8 @@ if "calc_results" not in st.session_state:
 # 🛠️ 1. ETF 分類清單（可在下方字典自行補充中文名稱）
 # ==========================================
 ETF_NAMES = {
-    "0050.TW": "元大台灣50", "009816.TW": "凱基台灣TOP50",
-    "00918.TW": "大華優利高填息30", "00961.TW": "FT臺灣永續高息",
-    "0056.TW": "元大高股息", "00878.TW": "國泰永續高股息",
-    "00919.TW": "群益台灣精選高息", "00939.TW": "統一台灣高息動能",
-    "00701.TW": "國泰股利精選30", "00915.TW": "凱基優選高股息30",
-    "00938.TW": "凱基優選30", "00713.TW": "元大台灣高息低波",
-    "00907.TW": "永豐優息存股", "00731.TW": "復華富時高息低波",
-    "00400A.TW": "主動國泰動能高息", "00401A.TW": "主動摩根台灣鑫收",
-    "00403A.TW": "主動統一升級50", "00404A.TW": "主動聯博動能50",
-    "00405A.TW": "主動富邦台灣龍耀", "00406A.TW": "主動中信台灣收益",
-    "00407A.TW": "主動凱基台灣", "00408A.TW": "主動第一金優股息",
-    "00410A.TW": "主動永豐科技趨勢", "00413A.TW": "主動玉山關鍵科技",
-    "00415A.TW": "主動群益核心50", "00416A.TW": "主動台新臺灣中小",
-    "00418A.TW": "主動復華台灣新星", "00419A.TW": "主動施羅德AI台股",
-    "00980A.TW": "主動野村臺灣優選", "00981A.TW": "主動統一台股增長",
-    "00982A.TW": "主動群益台灣強棒", "00984A.TW": "主動安聯台灣高息",
-    "00985A.TW": "主動野村台灣50", "00991A.TW": "主動復華未來50",
-    "00992A.TW": "主動群益科技創新", "00993A.TW": "主動安聯台灣",
-    "00994A.TW": "主動第一金台股優", "00995A.TW": "主動中信台灣卓越",
-    "00996A.TW": "主動兆豐台灣豐收", "00999A.TW": "主動野村臺灣高息",
+    "0050.TW": "元大台灣50",
+    "00961.TW": "FT臺灣永續高息",
 }
 
 def format_label(ticker):
@@ -167,15 +149,31 @@ if st.button("🚀 開始計算與疊圖比較", type="primary", use_container_w
             st.session_state.calc_results = {"summary": pd.DataFrame(summary_list), "roi": df_roi, "dd": df_dd}
 
 # ==========================================
-# 📈 4. 顯示結果與「大拇指滑桿連續查價器」
+# 📈 4. 顯示結果、頒獎台、指標說明與滑桿查價器
 # ==========================================
 if st.session_state.calc_results is not None:
     res = st.session_state.calc_results
     df_summary, df_roi, df_dd = res["summary"], res["roi"], res["dd"]
 
     st.divider()
+    if len(df_summary) >= 2:
+        best_roi = df_summary.loc[df_summary["總報酬 (%)"].idxmax()]
+        best_mdd = df_summary.loc[df_summary["最大回撤 (%)"].idxmax()]
+        best_shp = df_summary.loc[df_summary["夏普 Sharpe"].idxmax()]
+        w1, w2, w3 = st.columns(3)
+        w1.metric("🥇 區間報酬王", best_roi["ETF"], f"{best_roi['總報酬 (%)']:+.2f}%")
+        w2.metric("🛡️ 區間抗跌王", best_mdd["ETF"], f"MDD {best_mdd['最大回撤 (%)']:.2f}%", delta_color="off")
+        w3.metric("⚖️ CP值之王 (Sharpe)", best_shp["ETF"], f"{best_shp['夏普 Sharpe']:.2f}")
+
     st.subheader("🏆 區間報酬與風險比較總表")
     st.dataframe(df_summary, use_container_width=True, hide_index=True)
+
+    with st.expander("📖 指標公式與判讀說明（Sharpe / Sortino / Calmar 怎麼看？）"):
+        st.markdown("""
+        * **夏普比率 (Sharpe)**：`(年化平均報酬 - 1.5%) / 年化總波動度` — 衡量每單位「總波動」換到的超額報酬，適合當第一道通用篩選（大於 1 屬優秀）。
+        * **索提諾比率 (Sortino)**：`(年化平均報酬 - 1.5%) / 年化下檔波動度` — 只懲罰「下跌」波動、不把大漲算成風險，適合評估飆漲快或高股息抗跌標的。
+        * **卡瑪比率 (Calmar)**：`年化報酬 CAGR / |最大回撤 MDD|` — 衡量承受「最痛那一刀虧損」所換來的年化報酬，越高代表抗跌且解套快。
+        """)
 
     st.divider()
     st.subheader("🔍 大拇指連續滑動查價器")
@@ -205,5 +203,5 @@ if st.session_state.calc_results is not None:
     st.subheader("📊 累積報酬率走勢疊圖（%）")
     st.plotly_chart(build_chart(df_roi, "累積報酬率 (%)", selected_date), use_container_width=True, config={"displayModeBar": False})
 
-    st.subheader("🌊 回撤走勢水下圖（Underwater Plot, %）")
-    st.plotly_chart(build_chart(df_dd, "回撤幅度 (%)", selected_date), use_container_width=True, config={"displayModeBar": False})
+st.subheader("🌊 回撤走勢水下圖（Underwater Plot, %）")
+st.plotly_chart(build_chart(df_dd, "回撤幅度 (%)", selected_date), use_container_width=True, config={"displayModeBar": False})
