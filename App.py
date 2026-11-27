@@ -6,7 +6,6 @@ import streamlit as st
 import yfinance as yf
 
 st.set_page_config(page_title="多檔 ETF 報酬率與風險比較", page_icon="📈", layout="centered")
-
 st.title("📈 多檔 ETF 區間報酬率與回撤比較")
 st.caption("資料來源：Yahoo Finance（已啟用還原股價 auto_adjust 反映含息報酬）")
 
@@ -14,7 +13,7 @@ if "calc_results" not in st.session_state:
     st.session_state.calc_results = None
 
 # ==========================================
-# 🛠️ 1. ETF 中文名稱對照表與三大分類清單
+# 🛠️ 1. ETF 分類清單（可在下方字典自行補充中文名稱）
 # ==========================================
 ETF_NAMES = {
     "0050.TW": "元大台灣50", "009816.TW": "凱基台灣TOP50",
@@ -66,20 +65,13 @@ with cat_col2:
 with cat_col3:
     sel_active = st.multiselect("🎯 主動式", options=ACTIVE_ETFS, default=[], format_func=format_label)
 
-custom_tickers_input = st.text_input(
-    "✍️ 額外手動輸入其他股號（選填，多檔請用半形逗號 , 隔開）",
-    value="", placeholder="例如：2330.TW, VOO, QQQ"
-)
+custom_tickers_input = st.text_input("✍️ 額外手動輸入其他股號（多檔用半形逗號 , 隔開）", placeholder="例如：2330.TW, VOO, QQQ")
 
 # ==========================================
 # 📅 2. 快捷時間區間按鈕與日曆選擇器
 # ==========================================
 today = datetime.date.today()
-quick_range = st.radio(
-    "⏱️ 快速選擇回測區間",
-    options=["近一個月", "近一季", "近半年", "近一年", "今年以來", "自訂區間"],
-    index=4, horizontal=True
-)
+quick_range = st.radio("⏱️ 快速選擇回測區間", ["近一個月", "近一季", "近半年", "近一年", "今年以來", "自訂區間"], index=4, horizontal=True)
 
 range_days = {"近一個月": 30, "近一季": 90, "近半年": 182, "近一年": 365}
 default_start = today - datetime.timedelta(days=range_days[quick_range]) if quick_range in range_days else datetime.date(today.year, 1, 1)
@@ -105,6 +97,7 @@ if st.button("🚀 開始計算與疊圖比較", type="primary", use_container_w
     else:
         fetch_end = end_date + datetime.timedelta(days=1)
         summary_list, roi_series_dict, drawdown_series_dict = [], {}, {}
+        rf_rate = 0.015
 
         with st.spinner("📡 正在從 Yahoo Finance 抓取歷史資料..."):
             for ticker in tickers:
@@ -112,7 +105,7 @@ if st.button("🚀 開始計算與疊圖比較", type="primary", use_container_w
                 data = yf.download(ticker, start=start_date, end=fetch_end, auto_adjust=True, progress=False)
 
                 if data.empty:
-                    st.warning(f"⚠️ 找不到 **{display_name}** 的資料（可能尚未掛牌或需改用 `.TWO` 後綴），已自動略過。")
+                    st.warning(f"⚠️ 找不到 **{display_name}** 的資料（可能尚未掛牌或需改用 `.TWO`），已略過。")
                     continue
 
                 if isinstance(data.columns, pd.MultiIndex):
@@ -124,7 +117,7 @@ if st.button("🚀 開始計算與疊圖比較", type="primary", use_container_w
 
                 series_close = (data['Close'] if 'Close' in data.columns else data).squeeze().dropna()
                 if len(series_close) < 2:
-                    st.warning(f"⚠️ **{display_name}** 在此區間內的有效交易日不足 2 天，已略過。")
+                    st.warning(f"⚠️ **{display_name}** 有效交易日不足 2 天，已略過。")
                     continue
 
                 dates_list = series_close.index.tolist()
@@ -136,37 +129,41 @@ if st.button("🚀 開始計算與疊圖比較", type="primary", use_container_w
                 holding_days = (end_actual_date - start_actual_date).days
                 cagr = ((end_price / start_price) ** (365 / holding_days) - 1) * 100 if holding_days > 0 else 0.0
 
-                # 計算年化波動度 & 夏普值（無風險利率 1.5%）
                 daily_ret = series_close.pct_change().dropna()
+                ann_ret = float(daily_ret.mean()) * 252 if len(daily_ret) > 0 else 0.0
                 std_daily = float(daily_ret.std()) if len(daily_ret) > 1 else 0.0
                 ann_vol = (std_daily * np.sqrt(252) * 100) if std_daily > 0 else 0.0
-                sharpe = ((float(daily_ret.mean()) * 252 - 0.015) / (std_daily * np.sqrt(252))) if std_daily > 0 else 0.0
+                sharpe = ((ann_ret - rf_rate) / (std_daily * np.sqrt(252))) if std_daily > 0 else 0.0
 
-                # 計算每日回撤與最大回撤 (MDD)
+                downside_diff = np.minimum(0.0, daily_ret - (rf_rate / 252))
+                downside_std_ann = float(np.sqrt((downside_diff ** 2).mean()) * np.sqrt(252)) if len(daily_ret) > 1 else 0.0
+                sortino = ((ann_ret - rf_rate) / downside_std_ann) if downside_std_ann > 0 else 0.0
+
                 rolling_max = series_close.cummax()
                 drawdown_pct = ((series_close - rolling_max) / rolling_max) * 100
                 max_drawdown = float(drawdown_pct.min())
+                calmar = (cagr / abs(max_drawdown)) if max_drawdown < 0 else 0.0
 
                 summary_list.append({
-                    "ETF 代號與名稱": display_name,
+                    "ETF": display_name,
                     "起始日": start_actual_date.strftime("%Y-%m-%d"),
                     "起始價": round(start_price, 2),
                     "結束價": round(end_price, 2),
-                    "區間總報酬 (%)": round(roi, 2),
-                    "年化報酬 CAGR (%)": round(cagr, 2),
-                    "最大回撤 MDD (%)": round(max_drawdown, 2),
-                    "年化波動度 (%)": round(ann_vol, 2),
-                    "夏普值": round(sharpe, 2)
+                    "總報酬 (%)": round(roi, 2),
+                    "年化 CAGR (%)": round(cagr, 2),
+                    "最大回撤 (%)": round(max_drawdown, 2),
+                    "波動度 (%)": round(ann_vol, 2),
+                    "夏普 Sharpe": round(sharpe, 2),
+                    "索提諾 Sortino": round(sortino, 2),
+                    "卡瑪 Calmar": round(calmar, 2)
                 })
 
                 roi_series_dict[display_name] = (series_close / start_price - 1) * 100
                 drawdown_series_dict[display_name] = drawdown_pct
 
         if summary_list:
-            df_roi = pd.DataFrame(roi_series_dict)
-            df_dd = pd.DataFrame(drawdown_series_dict)
-            df_roi.index = df_roi.index.strftime("%Y-%m-%d")
-            df_dd.index = df_dd.index.strftime("%Y-%m-%d")
+            df_roi, df_dd = pd.DataFrame(roi_series_dict), pd.DataFrame(drawdown_series_dict)
+            df_roi.index, df_dd.index = df_roi.index.strftime("%Y-%m-%d"), df_dd.index.strftime("%Y-%m-%d")
             st.session_state.calc_results = {"summary": pd.DataFrame(summary_list), "roi": df_roi, "dd": df_dd}
 
 # ==========================================
@@ -183,10 +180,7 @@ if st.session_state.calc_results is not None:
     st.divider()
     st.subheader("🔍 大拇指連續滑動查價器")
     available_dates = df_roi.index.tolist()
-    selected_date = st.select_slider(
-        "👈 左右拖曳滑桿，即時連動下方兩張圖表的紅色垂直準心線：",
-        options=available_dates, value=available_dates[-1]
-    )
+    selected_date = st.select_slider("👈 左右拖曳滑桿，即時連動下方圖表：", options=available_dates, value=available_dates[-1])
 
     row_roi, row_dd = df_roi.loc[selected_date], df_dd.loc[selected_date]
     cols = st.columns(min(len(df_roi.columns), 3))
@@ -194,11 +188,7 @@ if st.session_state.calc_results is not None:
         val_roi, val_dd = row_roi[label_name], row_dd[label_name]
         dd_label = ("創波段新高 (0%)" if round(val_dd, 2) == 0 else f"距前高 {val_dd:.2f}%") if pd.notna(val_dd) else ""
         with cols[idx % 3]:
-            st.metric(
-                label=f"{label_name} ({selected_date})",
-                value=f"{val_roi:+.2f}%" if pd.notna(val_roi) else "無資料",
-                delta=dd_label, delta_color="off"
-            )
+            st.metric(label=f"{label_name} ({selected_date})", value=f"{val_roi:+.2f}%" if pd.notna(val_roi) else "無資料", delta=dd_label, delta_color="off")
 
     def build_chart(df, y_title, active_date):
         fig = go.Figure()
@@ -207,11 +197,8 @@ if st.session_state.calc_results is not None:
         fig.add_hline(y=0, line_width=1, line_dash="dash", line_color="gray", opacity=0.5)
         fig.add_vline(x=active_date, line_width=1.5, line_dash="solid", line_color="#FF4B4B")
         fig.update_layout(
-            hovermode="x unified",
-            xaxis=dict(title="", fixedrange=True),
-            yaxis=dict(title=y_title, ticksuffix="%", fixedrange=True),
-            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
-            margin=dict(l=10, r=10, t=35, b=10), height=360
+            hovermode="x unified", xaxis=dict(title="", fixedrange=True), yaxis=dict(title=y_title, ticksuffix="%", fixedrange=True),
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0), margin=dict(l=10, r=10, t=35, b=10), height=360
         )
         return fig
 
