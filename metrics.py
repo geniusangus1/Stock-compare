@@ -6,39 +6,44 @@ import yfinance as yf
 from etf_config import ROLLING_WINDOWS
 
 @st.cache_data(ttl=3600, show_spinner=False)
-def fetch_full_history(ticker: str, _v: int = 3) -> pd.Series:
-    # 台股 (.TW / .TWO) 在 Yahoo Finance 2015 年以前的早期歷史資料常有配息/分割未對齊的斷層
-    # 美股或其他市場則保留自 2000 年起的完整歷史
+def fetch_full_history(ticker: str, _v: int = 5):
     is_tw = ticker.endswith(".TW") or ticker.endswith(".TWO")
     fetch_start = "2015-01-01" if is_tw else "2000-01-01"
     end_dt = datetime.date.today() + datetime.timedelta(days=1)
 
     try:
         t_obj = yf.Ticker(ticker)
-        data = t_obj.history(start=fetch_start, end=end_dt.strftime("%Y-%m-%d"), auto_adjust=True)
+        data_adj = t_obj.history(start=fetch_start, end=end_dt.strftime("%Y-%m-%d"), auto_adjust=True)
+        data_raw = t_obj.history(start=fetch_start, end=end_dt.strftime("%Y-%m-%d"), auto_adjust=False)
     except Exception:
-        return pd.Series(dtype=float)
+        return pd.Series(dtype=float), pd.DataFrame()
 
-    if data is None or data.empty or "Close" not in data.columns:
-        return pd.Series(dtype=float)
+    if data_adj is None or data_adj.empty or "Close" not in data_adj.columns:
+        return pd.Series(dtype=float), pd.DataFrame()
 
-    series_close = data["Close"].squeeze().dropna()
+    series_close = data_adj["Close"].squeeze().dropna()
     if series_close.empty:
-        return pd.Series(dtype=float)
+        return pd.Series(dtype=float), pd.DataFrame()
 
     series_close.index = pd.to_datetime(series_close.index).tz_localize(None)
 
-    # 🛡️ 偵測單日異常價格跳動（單日漲跌 > 15% 对台股 ETF 來說必為資料異常）
-    threshold = 0.15 if is_tw else 0.25
-    daily_pct = series_close.pct_change().abs()
-    price_anomalies = daily_pct[daily_pct > threshold]
-    if not price_anomalies.empty:
-        last_price_date = price_anomalies.index[-1]
-        cleaned = series_close.loc[series_close.index > last_price_date]
+    # 🛡️ 透過 20 日滾動中位數比值，精準攔截分割未對齊或除息跳空異常區間
+    rolling_med = series_close.rolling(window=20, min_periods=1).median()
+    ratio = series_close / rolling_med
+    anomalies = series_close[(ratio > 1.35) | (ratio < 0.65)]
+    if not anomalies.empty:
+        last_anomaly_date = anomalies.index[-1]
+        cleaned = series_close.loc[series_close.index > last_anomaly_date]
         if len(cleaned) > 10:
             series_close = cleaned
 
-    return series_close
+    div_df = pd.DataFrame()
+    if data_raw is not None and not data_raw.empty and "Dividends" in data_raw.columns:
+        div_df = data_raw[["Close", "Dividends"]].copy()
+        div_df.index = pd.to_datetime(div_df.index).tz_localize(None)
+
+    return series_close, div_df
+
 
 def calc_rolling_stats(full_series: pd.Series, display_name: str, rolling_curves: dict) -> dict:
     roll_row = {
