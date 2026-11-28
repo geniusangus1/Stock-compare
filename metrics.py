@@ -6,11 +6,16 @@ import yfinance as yf
 from etf_config import ROLLING_WINDOWS
 
 @st.cache_data(ttl=3600, show_spinner=False)
-def fetch_full_history(ticker: str, _v: int = 2) -> pd.Series:
+def fetch_full_history(ticker: str, _v: int = 3) -> pd.Series:
+    # 台股 (.TW / .TWO) 在 Yahoo Finance 2015 年以前的早期歷史資料常有配息/分割未對齊的斷層
+    # 美股或其他市場則保留自 2000 年起的完整歷史
+    is_tw = ticker.endswith(".TW") or ticker.endswith(".TWO")
+    fetch_start = "2015-01-01" if is_tw else "2000-01-01"
     end_dt = datetime.date.today() + datetime.timedelta(days=1)
+
     try:
         t_obj = yf.Ticker(ticker)
-        data = t_obj.history(start="2000-01-01", end=end_dt.strftime("%Y-%m-%d"), auto_adjust=True)
+        data = t_obj.history(start=fetch_start, end=end_dt.strftime("%Y-%m-%d"), auto_adjust=True)
     except Exception:
         return pd.Series(dtype=float)
 
@@ -23,18 +28,10 @@ def fetch_full_history(ticker: str, _v: int = 2) -> pd.Series:
 
     series_close.index = pd.to_datetime(series_close.index).tz_localize(None)
 
-    # 🛡️ 1. 偵測時間斷層（兩筆交易日之間相隔超過 20 天，代表中間缺資料）
-    day_gaps = series_close.index.to_series().diff().dt.days
-    gap_anomalies = day_gaps[day_gaps > 20]
-    if not gap_anomalies.empty:
-        last_gap_date = gap_anomalies.index[-1]
-        cleaned = series_close.loc[series_close.index >= last_gap_date]
-        if len(cleaned) > 10:
-            series_close = cleaned
-
-    # 🛡️ 2. 偵測單日異常價格跳動（除息或分割未還原，單日漲跌 > 20%）
+    # 🛡️ 偵測單日異常價格跳動（單日漲跌 > 15% 对台股 ETF 來說必為資料異常）
+    threshold = 0.15 if is_tw else 0.25
     daily_pct = series_close.pct_change().abs()
-    price_anomalies = daily_pct[daily_pct > 0.20]
+    price_anomalies = daily_pct[daily_pct > threshold]
     if not price_anomalies.empty:
         last_price_date = price_anomalies.index[-1]
         cleaned = series_close.loc[series_close.index > last_price_date]
@@ -42,8 +39,6 @@ def fetch_full_history(ticker: str, _v: int = 2) -> pd.Series:
             series_close = cleaned
 
     return series_close
-
-
 
 def calc_rolling_stats(full_series: pd.Series, display_name: str, rolling_curves: dict) -> dict:
     roll_row = {
