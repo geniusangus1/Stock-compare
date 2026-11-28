@@ -6,7 +6,7 @@ import yfinance as yf
 from etf_config import ROLLING_WINDOWS
 
 @st.cache_data(ttl=3600, show_spinner=False)
-def fetch_full_history(ticker: str) -> pd.Series:
+def fetch_full_history(ticker: str, _v: int = 2) -> pd.Series:
     end_dt = datetime.date.today() + datetime.timedelta(days=1)
     try:
         t_obj = yf.Ticker(ticker)
@@ -23,17 +23,26 @@ def fetch_full_history(ticker: str) -> pd.Series:
 
     series_close.index = pd.to_datetime(series_close.index).tz_localize(None)
 
-    # 🛡️ 自動偵測並過濾 Yahoo Finance 早期除息/分割異常斷層（單日跳動 > 25% 視為資料異常）
+    # 🛡️ 1. 偵測時間斷層（兩筆交易日之間相隔超過 20 天，代表中間缺資料）
+    day_gaps = series_close.index.to_series().diff().dt.days
+    gap_anomalies = day_gaps[day_gaps > 20]
+    if not gap_anomalies.empty:
+        last_gap_date = gap_anomalies.index[-1]
+        cleaned = series_close.loc[series_close.index >= last_gap_date]
+        if len(cleaned) > 10:
+            series_close = cleaned
+
+    # 🛡️ 2. 偵測單日異常價格跳動（除息或分割未還原，單日漲跌 > 20%）
     daily_pct = series_close.pct_change().abs()
-    anomalies = daily_pct[daily_pct > 0.25]
-    if not anomalies.empty:
-        last_anomaly_date = anomalies.index[-1]
-        cleaned = series_close.loc[series_close.index > last_anomaly_date]
-        # 確保截斷後的有效連續資料足夠才套用
+    price_anomalies = daily_pct[daily_pct > 0.20]
+    if not price_anomalies.empty:
+        last_price_date = price_anomalies.index[-1]
+        cleaned = series_close.loc[series_close.index > last_price_date]
         if len(cleaned) > 10:
             series_close = cleaned
 
     return series_close
+
 
 
 def calc_rolling_stats(full_series: pd.Series, display_name: str, rolling_curves: dict) -> dict:
