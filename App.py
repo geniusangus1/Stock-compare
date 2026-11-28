@@ -5,7 +5,7 @@ import streamlit as st
 from etf_config import BENCHMARK_OPTIONS, ROLLING_WINDOWS, format_label, get_categorized_etfs
 from metrics import calc_period_metrics, calc_rolling_stats, fetch_full_history
 
-st.set_page_config(page_title="多檔 ETF 報酬率與風險比較", page_icon="📈", layout="centered")
+st.set_page_config(page_title="多檔 ETF 報酬率與風險比較", page_icon="📈", layout="wide")
 st.title("📈 多檔 ETF 區間報酬率與回撤比較")
 st.caption("資料來源：Yahoo Finance（已啟用還原股價 auto_adjust 反映含息報酬）")
 
@@ -109,7 +109,7 @@ def build_chart(df, y_title, bench_label, active_date=None):
         yaxis=dict(title=y_title, ticksuffix="%", fixedrange=True),
         legend=dict(orientation="h", yanchor="bottom", y=1.04, xanchor="left", x=0),
         margin=dict(l=10, r=10, t=20, b=10),
-        height=380
+        height=500
     )
     return fig
 
