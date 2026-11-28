@@ -1,10 +1,10 @@
-from etf_config import ETF_NAMES
+# app.py
 import datetime
-import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
-import yfinance as yf
+from etf_config import BENCHMARK_OPTIONS, ROLLING_WINDOWS, format_label, get_categorized_etfs
+from metrics import calc_period_metrics, calc_rolling_stats, fetch_full_history
 
 st.set_page_config(page_title="多檔 ETF 報酬率與風險比較", page_icon="📈", layout="centered")
 st.title("📈 多檔 ETF 區間報酬率與回撤比較")
@@ -13,67 +13,27 @@ st.caption("資料來源：Yahoo Finance（已啟用還原股價 auto_adjust 反
 if "calc_results" not in st.session_state:
     st.session_state.calc_results = None
 
-# ==========================================
-# 🛠️ 1. ETF 分類清單（可在下方字典自行補充中文名稱）
-# ==========================================
-ETF_NAMES = {
-    "0050.TW": "元大台灣50", "009816.TW": "凱基台灣TOP50",
-    "00918.TW": "大華優利高填息30", "00961.TW": "FT臺灣永續高息",
-    "0056.TW": "元大高股息", "00878.TW": "國泰永續高股息",
-    "00919.TW": "群益台灣精選高息", "00939.TW": "統一台灣高息動能",
-    "00701.TW": "國泰股利精選30", "00915.TW": "凱基優選高股息30",
-    "00938.TW": "凱基優選30", "00713.TW": "元大台灣高息低波",
-    "00907.TW": "永豐優息存股", "00731.TW": "復華富時高息低波",
-    "00400A.TW": "主動國泰動能高息", "00401A.TW": "主動摩根台灣鑫收",
-    "00403A.TW": "主動統一升級50", "00404A.TW": "主動聯博動能50",
-    "00405A.TW": "主動富邦台灣龍耀", "00406A.TW": "主動中信台灣收益",
-    "00407A.TW": "主動凱基台灣", "00408A.TW": "主動第一金優股息",
-    "00410A.TW": "主動永豐科技趨勢", "00413A.TW": "主動玉山關鍵科技",
-    "00415A.TW": "主動群益核心50", "00416A.TW": "主動台新臺灣中小",
-    "00418A.TW": "主動復華台灣新星", "00419A.TW": "主動施羅德AI台股",
-    "00980A.TW": "主動野村臺灣優選", "00981A.TW": "主動統一台股增長",
-    "00982A.TW": "主動群益台灣強棒", "00984A.TW": "主動安聯台灣高息",
-    "00985A.TW": "主動野村台灣50", "00987A.TW":"主動台新優勢成長", "00991A.TW": "主動復華未來50",
-    "00992A.TW": "主動群益科技創新", "00993A.TW": "主動安聯台灣",
-    "00994A.TW": "主動第一金台股優", "00995A.TW": "主動中信台灣卓越",
-    "00996A.TW": "主動兆豐台灣豐收", "00999A.TW": "主動野村臺灣高息",
-}
-
-def format_label(ticker):
-    code = ticker.replace(".TW", "").replace(".TWO", "")
-    name = ETF_NAMES.get(ticker, "")
-    return f"{code} {name}".strip()
-
-MARKET_CAP_ETFS = ["0050.TW", "009816.TW"]
-HIGH_DIV_ETFS = [
-    "00918.TW", "00961.TW", "0056.TW", "00878.TW", "00919.TW", "00939.TW",
-    "00701.TW", "00915.TW", "00938.TW", "00713.TW", "00907.TW", "00731.TW"
-]
-ACTIVE_ETFS = [
-    "00400A.TW", "00401A.TW", "00403A.TW", "00404A.TW", "00405A.TW", "00406A.TW",
-    "00407A.TW", "00408A.TW", "00410A.TW", "00413A.TW", "00415A.TW", "00416A.TW",
-    "00418A.TW", "00419A.TW", "00980A.TW", "00981A.TW", "00982A.TW", "00984A.TW",
-    "00985A.TW", "00987A.TW", "00991A.TW", "00992A.TW", "00993A.TW", "00994A.TW", "00995A.TW",
-    "00996A.TW", "00999A.TW"
-]
+# 1. 選單與基準線設定
+MARKET_CAP_ETFS, HIGH_DIV_ETFS, ACTIVE_ETFS = get_categorized_etfs()
 
 st.markdown("**📌 快速勾選常用 ETF（可跨類別複選）**")
 cat_col1, cat_col2, cat_col3 = st.columns(3)
 with cat_col1:
-    sel_market = st.multiselect("📈 市值型", options=MARKET_CAP_ETFS, default=["0050.TW"], format_func=format_label)
+    sel_market = st.multiselect("📈 市值型", options=MARKET_CAP_ETFS, default=MARKET_CAP_ETFS[:1], format_func=format_label)
 with cat_col2:
-    sel_div = st.multiselect("💰 高股息", options=HIGH_DIV_ETFS, default=["00961.TW"], format_func=format_label)
+    sel_div = st.multiselect("💰 高股息", options=HIGH_DIV_ETFS, default=HIGH_DIV_ETFS[:2], format_func=format_label)
 with cat_col3:
     sel_active = st.multiselect("🎯 主動式", options=ACTIVE_ETFS, default=[], format_func=format_label)
 
-custom_tickers_input = st.text_input("✍️ 額外手動輸入其他股號（多檔用半形逗號 , 隔開）", placeholder="例如：2330.TW, VOO, QQQ")
+in_col1, in_col2 = st.columns([3, 2])
+with in_col1:
+    custom_tickers_input = st.text_input("✍️ 手動輸入其他股號（半形逗號隔開）", placeholder="例如：2330.TW, VOO, QQQ")
+with in_col2:
+    bench_choice = st.selectbox("🏁 大盤基準線 (Benchmark)", options=list(BENCHMARK_OPTIONS.keys()), index=1)
 
-# ==========================================
-# 📅 2. 快捷時間區間按鈕與日曆選擇器
-# ==========================================
+# 2. 時間區間設定
 today = datetime.date.today()
 quick_range = st.radio("⏱️ 快速選擇回測區間", ["近一個月", "近一季", "近半年", "近一年", "今年以來", "自訂區間"], index=4, horizontal=True)
-
 range_days = {"近一個月": 30, "近一季": 90, "近半年": 182, "近一年": 365}
 default_start = today - datetime.timedelta(days=range_days[quick_range]) if quick_range in range_days else datetime.date(today.year, 1, 1)
 
@@ -83,144 +43,126 @@ with col1:
 with col2:
     end_date = st.date_input("終止日期", value=today)
 
-# ==========================================
-# 🚀 3. 核心計算引擎
-# ==========================================
+# 3. 執行計算
 if st.button("🚀 開始計算與疊圖比較", type="primary", use_container_width=True):
     selected_tickers = sel_market + sel_div + sel_active
     custom_tickers = [t.strip().upper() for t in custom_tickers_input.split(",") if t.strip()]
     tickers = list(dict.fromkeys(selected_tickers + custom_tickers))
+    bench_ticker = BENCHMARK_OPTIONS[bench_choice]
 
     if not tickers:
         st.warning("⚠️ 請至少勾選或輸入一檔股票代號！")
     elif start_date >= end_date:
         st.error("⚠️ 終止日期必須晚於起始日期！")
     else:
-        fetch_end = end_date + datetime.timedelta(days=1)
-        summary_list, roi_series_dict, drawdown_series_dict = [], {}, {}
-        rf_rate = 0.015
+        summary_list, roi_dict, dd_dict, rolling_stats_list = [], {}, {}, []
+        rolling_curves = {k: {} for k in ROLLING_WINDOWS.keys()}
 
-        with st.spinner("📡 正在從 Yahoo Finance 抓取歷史資料..."):
-            for ticker in tickers:
-                display_name = format_label(ticker)
-                data = yf.download(ticker, start=start_date, end=fetch_end, auto_adjust=True, progress=False)
+        calc_queue = [(t, format_label(t)) for t in tickers]
+        if bench_ticker and bench_ticker not in tickers:
+            bench_label = f"🏁 [基準] {bench_choice.split(' ')[1]}"
+            calc_queue.append((bench_ticker, bench_label))
+        else:
+            bench_label = format_label(bench_ticker) if bench_ticker else None
 
-                if data.empty:
-                    st.warning(f"⚠️ 找不到 **{display_name}** 的資料（可能尚未掛牌或需改用 `.TWO`），已略過。")
+        with st.spinner("📡 正在抓取歷史資料並計算風險與滾動報酬..."):
+            for ticker, display_name in calc_queue:
+                full_series = fetch_full_history(ticker)
+                if full_series.empty:
+                    st.warning(f"⚠️ 找不到 **{display_name}** 的資料，已略過。")
                     continue
 
-                if isinstance(data.columns, pd.MultiIndex):
-                    if 'Close' in data.columns.get_level_values(0):
-                        data = data.loc[:, data.columns.get_level_values(0) == 'Close']
-                        data.columns = ['Close']
-                    elif ticker in data.columns.get_level_values(1):
-                        data = data.xs(ticker, axis=1, level=1)
+                rolling_stats_list.append(calc_rolling_stats(full_series, display_name, rolling_curves))
 
-                series_close = (data['Close'] if 'Close' in data.columns else data).squeeze().dropna()
+                mask = (full_series.index.date >= start_date) & (full_series.index.date <= end_date)
+                series_close = full_series.loc[mask]
                 if len(series_close) < 2:
-                    st.warning(f"⚠️ **{display_name}** 有效交易日不足 2 天，已略過。")
+                    st.warning(f"⚠️ **{display_name}** 在所選區間內交易日不足 2 天，已略過區間比較。")
                     continue
 
-                dates_list = series_close.index.tolist()
-                prices_list = series_close.to_numpy().flatten().tolist()
-                start_actual_date, end_actual_date = dates_list.pop(0), dates_list.pop(-1)
-                start_price, end_price = float(prices_list.pop(0)), float(prices_list.pop(-1))
+                s_row, r_ser, d_ser = calc_period_metrics(series_close, display_name)
+                summary_list.append(s_row)
+                roi_dict[display_name], dd_dict[display_name] = r_ser, d_ser
 
-                roi = (end_price / start_price - 1) * 100
-                holding_days = (end_actual_date - start_actual_date).days
-                cagr = ((end_price / start_price) ** (365 / holding_days) - 1) * 100 if holding_days > 0 else 0.0
+        if summary_list or rolling_stats_list:
+            df_roi, df_dd = pd.DataFrame(roi_dict), pd.DataFrame(dd_dict)
+            if not df_roi.empty:
+                df_roi.index = df_roi.index.strftime("%Y-%m-%d")
+                df_dd.index = df_dd.index.strftime("%Y-%m-%d")
+            st.session_state.calc_results = {
+                "summary": pd.DataFrame(summary_list), "roi": df_roi, "dd": df_dd,
+                "rolling_stats": pd.DataFrame(rolling_stats_list),
+                "rolling_curves": rolling_curves, "bench_label": bench_label
+            }
 
-                daily_ret = series_close.pct_change().dropna()
-                ann_ret = float(daily_ret.mean()) * 252 if len(daily_ret) > 0 else 0.0
-                std_daily = float(daily_ret.std()) if len(daily_ret) > 1 else 0.0
-                ann_vol = (std_daily * np.sqrt(252) * 100) if std_daily > 0 else 0.0
-                sharpe = ((ann_ret - rf_rate) / (std_daily * np.sqrt(252))) if std_daily > 0 else 0.0
+# 4. 視覺化呈現
+def build_chart(df, y_title, bench_label, active_date=None, title=""):
+    fig = go.Figure()
+    for col in df.columns:
+        line_style = dict(width=2.8, dash="dot", color="#888888") if col == bench_label else dict(width=2.3)
+        fig.add_trace(go.Scatter(x=df.index, y=df[col], mode="lines", name=col, line=line_style, hovertemplate="%{y:+.2f}%"))
+    fig.add_hline(y=0, line_width=1.2, line_dash="dash", line_color="#FF4B4B" if not active_date else "gray", opacity=0.6)
+    if active_date:
+        fig.add_vline(x=active_date, line_width=1.5, line_dash="solid", line_color="#FF4B4B")
+    fig.update_layout(
+        title=title, hovermode="x unified", xaxis=dict(title="", fixedrange=True),
+        yaxis=dict(title=y_title, ticksuffix="%", fixedrange=True),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
+        margin=dict(l=10, r=10, t=45 if title else 35, b=10), height=360
+    )
+    return fig
 
-                downside_diff = np.minimum(0.0, daily_ret - (rf_rate / 252))
-                downside_std_ann = float(np.sqrt((downside_diff ** 2).mean()) * np.sqrt(252)) if len(daily_ret) > 1 else 0.0
-                sortino = ((ann_ret - rf_rate) / downside_std_ann) if downside_std_ann > 0 else 0.0
-
-                rolling_max = series_close.cummax()
-                drawdown_pct = ((series_close - rolling_max) / rolling_max) * 100
-                max_drawdown = float(drawdown_pct.min())
-                calmar = (cagr / abs(max_drawdown)) if max_drawdown < 0 else 0.0
-
-                summary_list.append({
-                    "ETF": display_name,
-                    "起始日": start_actual_date.strftime("%Y-%m-%d"),
-                    "起始價": round(start_price, 2),
-                    "結束價": round(end_price, 2),
-                    "總報酬 (%)": round(roi, 2),
-                    "年化 CAGR (%)": round(cagr, 2),
-                    "最大回撤 (%)": round(max_drawdown, 2),
-                    "波動度 (%)": round(ann_vol, 2),
-                    "夏普 Sharpe": round(sharpe, 2),
-                    "索提諾 Sortino": round(sortino, 2),
-                    "卡瑪 Calmar": round(calmar, 2)
-                })
-
-                roi_series_dict[display_name] = (series_close / start_price - 1) * 100
-                drawdown_series_dict[display_name] = drawdown_pct
-
-        if summary_list:
-            df_roi, df_dd = pd.DataFrame(roi_series_dict), pd.DataFrame(drawdown_series_dict)
-            df_roi.index, df_dd.index = df_roi.index.strftime("%Y-%m-%d"), df_dd.index.strftime("%Y-%m-%d")
-            st.session_state.calc_results = {"summary": pd.DataFrame(summary_list), "roi": df_roi, "dd": df_dd}
-
-# ==========================================
-# 📈 4. 顯示結果、頒獎台、指標說明與滑桿查價器
-# ==========================================
 if st.session_state.calc_results is not None:
     res = st.session_state.calc_results
     df_summary, df_roi, df_dd = res["summary"], res["roi"], res["dd"]
+    df_rolling_stats, rolling_curves, bench_label = res["rolling_stats"], res["rolling_curves"], res["bench_label"]
 
-    st.divider()
-    if len(df_summary) >= 2:
-        best_roi = df_summary.loc[df_summary["總報酬 (%)"].idxmax()]
-        best_mdd = df_summary.loc[df_summary["最大回撤 (%)"].idxmax()]
-        best_shp = df_summary.loc[df_summary["夏普 Sharpe"].idxmax()]
-        w1, w2, w3 = st.columns(3)
-        w1.metric("🥇 區間報酬王", best_roi["ETF"], f"{best_roi['總報酬 (%)']:+.2f}%")
-        w2.metric("🛡️ 區間抗跌王", best_mdd["ETF"], f"MDD {best_mdd['最大回撤 (%)']:.2f}%", delta_color="off")
-        w3.metric("⚖️ CP值之王 (Sharpe)", best_shp["ETF"], f"{best_shp['夏普 Sharpe']:.2f}")
+    if not df_summary.empty:
+        st.divider()
+        etf_only = df_summary[~df_summary["標的"].str.startswith("🏁")]
+        if len(etf_only) >= 2:
+            w1, w2, w3 = st.columns(3)
+            b_roi = etf_only.loc[etf_only["總報酬 (%)"].idxmax()]
+            b_mdd = etf_only.loc[etf_only["最大回撤 (%)"].idxmax()]
+            b_shp = etf_only.loc[etf_only["夏普 Sharpe"].idxmax()]
+            w1.metric("🥇 區間報酬王", b_roi["標的"], f"{b_roi['總報酬 (%)']:+.2f}%")
+            w2.metric("🛡️ 區間抗跌王", b_mdd["標的"], f"MDD {b_mdd['最大回撤 (%)']:.2f}%", delta_color="off")
+            w3.metric("⚖️ CP值之王 (Sharpe)", b_shp["標的"], f"{b_shp['夏普 Sharpe']:.2f}")
 
-    st.subheader("🏆 區間報酬與風險比較總表")
-    st.dataframe(df_summary, use_container_width=True, hide_index=True)
+        st.subheader("🏆 區間報酬與風險比較總表")
+        st.dataframe(df_summary, use_container_width=True, hide_index=True)
 
-    with st.expander("📖 指標公式與判讀說明（Sharpe / Sortino / Calmar 怎麼看？）"):
-        st.markdown("""
-        * **夏普比率 (Sharpe)**：`(年化平均報酬 - 1.5%) / 年化總波動度` — 衡量每單位「總波動」換到的超額報酬，適合當第一道通用篩選（大於 1 屬優秀）。
-        * **索提諾比率 (Sortino)**：`(年化平均報酬 - 1.5%) / 年化下檔波動度` — 只懲罰「下跌」波動、不把大漲算成風險，適合評估飆漲快或高股息抗跌標的。
-        * **卡瑪比率 (Calmar)**：`年化報酬 CAGR / |最大回撤 MDD|` — 衡量承受「最痛那一刀虧損」所換來的年化報酬，越高代表抗跌且解套快。
-        """)
+        st.divider()
+        st.subheader("🔍 大拇指連續滑動查價器")
+        avail_dates = df_roi.index.tolist()
+        sel_date = st.select_slider("👈 左右拖曳滑桿，即時連動下方圖表：", options=avail_dates, value=avail_dates[-1])
 
-    st.divider()
-    st.subheader("🔍 大拇指連續滑動查價器")
-    available_dates = df_roi.index.tolist()
-    selected_date = st.select_slider("👈 左右拖曳滑桿，即時連動下方圖表：", options=available_dates, value=available_dates[-1])
+        row_roi, row_dd = df_roi.loc[sel_date], df_dd.loc[sel_date]
+        cols = st.columns(min(len(df_roi.columns), 3))
+        for idx, name in enumerate(df_roi.columns):
+            v_roi, v_dd = row_roi[name], row_dd[name]
+            dd_txt = ("創波段新高 (0%)" if round(v_dd, 2) == 0 else f"距前高 {v_dd:.2f}%") if pd.notna(v_dd) else ""
+            with cols[idx % 3]:
+                st.metric(label=f"{name} ({sel_date})", value=f"{v_roi:+.2f}%" if pd.notna(v_roi) else "無資料", delta=dd_txt, delta_color="off")
 
-    row_roi, row_dd = df_roi.loc[selected_date], df_dd.loc[selected_date]
-    cols = st.columns(min(len(df_roi.columns), 3))
-    for idx, label_name in enumerate(df_roi.columns):
-        val_roi, val_dd = row_roi[label_name], row_dd[label_name]
-        dd_label = ("創波段新高 (0%)" if round(val_dd, 2) == 0 else f"距前高 {val_dd:.2f}%") if pd.notna(val_dd) else ""
-        with cols[idx % 3]:
-            st.metric(label=f"{label_name} ({selected_date})", value=f"{val_roi:+.2f}%" if pd.notna(val_roi) else "無資料", delta=dd_label, delta_color="off")
+        st.subheader("📊 累積報酬率走勢疊圖（%）")
+        st.plotly_chart(build_chart(df_roi, "累積報酬率 (%)", bench_label, sel_date), use_container_width=True, config={"displayModeBar": False})
 
-    def build_chart(df, y_title, active_date):
-        fig = go.Figure()
-        for col in df.columns:
-            fig.add_trace(go.Scatter(x=df.index, y=df[col], mode="lines", name=col, line=dict(width=2.5), hovertemplate="%{y:+.2f}%"))
-        fig.add_hline(y=0, line_width=1, line_dash="dash", line_color="gray", opacity=0.5)
-        fig.add_vline(x=active_date, line_width=1.5, line_dash="solid", line_color="#FF4B4B")
-        fig.update_layout(
-            hovermode="x unified", xaxis=dict(title="", fixedrange=True), yaxis=dict(title=y_title, ticksuffix="%", fixedrange=True),
-            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0), margin=dict(l=10, r=10, t=35, b=10), height=360
-        )
-        return fig
+        st.subheader("🌊 回撤走勢水下圖（Underwater Plot, %）")
+        st.plotly_chart(build_chart(df_dd, "回撤幅度 (%)", bench_label, sel_date), use_container_width=True, config={"displayModeBar": False})
 
-    st.subheader("📊 累積報酬率走勢疊圖（%）")
-    st.plotly_chart(build_chart(df_roi, "累積報酬率 (%)", selected_date), use_container_width=True, config={"displayModeBar": False})
+    if not df_rolling_stats.empty:
+        st.divider()
+        st.subheader("🔄 歷史滾動報酬與正報酬勝率（上市以來完整統計）")
+        st.caption("💡 半年為累計報酬；1年/3年/5年為年化報酬 (CAGR)。`^TWII` 為不含息指數，含息基準請選 `0050.TW`。")
+        st.dataframe(df_rolling_stats, use_container_width=True, hide_index=True)
 
-    st.subheader("🌊 回撤走勢水下圖（Underwater Plot, %）")
-    st.plotly_chart(build_chart(df_dd, "回撤幅度 (%)", selected_date), use_container_width=True, config={"displayModeBar": False})
+        sel_win = st.radio("📈 選擇滾動報酬走勢週期：", options=list(ROLLING_WINDOWS.keys()), index=1, horizontal=True)
+        curve_dict = rolling_curves.get(sel_win, {})
+        if curve_dict:
+            df_roll = pd.DataFrame(curve_dict)
+            df_roll.index = df_roll.index.strftime("%Y-%m-%d")
+            y_lbl = "累計滾動報酬 (%)" if sel_win == "半年 (6M)" else "年化滾動報酬 CAGR (%)"
+            st.plotly_chart(build_chart(df_roll, y_lbl, bench_label, title=f"{sel_win} 滾動報酬率走勢（灰色虛線為基準）"), use_container_width=True, config={"displayModeBar": False})
+        else:
+            st.info(f"ℹ️ 目前勾選的標的掛牌時間皆未滿 **{sel_win}**，請改選較短週期。")
