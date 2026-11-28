@@ -128,8 +128,7 @@ if st.session_state.calc_results is not None:
             w2.metric("🛡️ 區間抗跌王", b_mdd["標的"], f"MDD {b_mdd['最大回撤 (%)']:.2f}%", delta_color="off")
             w3.metric("⚖️ CP值之王 (Sharpe)", b_shp["標的"], f"{b_shp['夏普 Sharpe']:.2f}")
 
-        st.subheader("🏆 區間報酬與風險比較總表")
-                st.subheader("🏆 區間報酬與風險比較總表")
+        st.subheader("🏆 區間報酬與風險比較總表")        
         st.dataframe(df_summary, use_container_width=True, hide_index=True)
 
         with st.expander("📖 風險指標怎麼看？（Sharpe / Sortino / Calmar 白話說明）"):
