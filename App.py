@@ -129,7 +129,15 @@ if st.session_state.calc_results is not None:
             w3.metric("⚖️ CP值之王 (Sharpe)", b_shp["標的"], f"{b_shp['夏普 Sharpe']:.2f}")
 
         st.subheader("🏆 區間報酬與風險比較總表")
+                st.subheader("🏆 區間報酬與風險比較總表")
         st.dataframe(df_summary, use_container_width=True, hide_index=True)
+
+        with st.expander("📖 風險指標怎麼看？（Sharpe / Sortino / Calmar 白話說明）"):
+            st.markdown("""
+            * **夏普比率 (Sharpe)**：`(年化平均報酬 - 1.5%) / 年化總波動度` — 衡量每承受一單位「總波動」換到的超額報酬（大於 **1** 屬優秀）。
+            * **索提諾比率 (Sortino)**：`(年化平均報酬 - 1.5%) / 年化下檔波動度` — 只懲罰「下跌」波動、不把大漲算成風險，適合評估飆漲快或高股息抗跌標的。
+            * **卡瑪比率 (Calmar)**：`年化報酬 CAGR / |最大回撤 MDD|` — 衡量承受「歷史最痛那一刀虧損」所換來的年化報酬，越高代表抗跌且解套越快。
+            """)
 
         st.divider()
         st.subheader("🔍 大拇指連續滑動查價器")
@@ -152,9 +160,17 @@ if st.session_state.calc_results is not None:
 
     if not df_rolling_stats.empty:
         st.divider()
-        st.subheader("🔄 歷史滾動報酬與正報酬勝率（上市以來完整統計）")
+                st.subheader("🔄 歷史滾動報酬與正報酬勝率（上市以來完整統計）")
         st.caption("💡 半年為累計報酬；1年/3年/5年為年化報酬 (CAGR)。`^TWII` 為不含息指數，含息基準請選 `0050.TW`。")
         st.dataframe(df_rolling_stats, use_container_width=True, hide_index=True)
+
+        with st.expander("📖 什麼是滾動報酬？「勝率」與「高 / 低」怎麼看？"):
+            st.markdown("""
+            * **為什麼要看滾動報酬？**：一般回測只看單一買賣時間，容易受運氣影響。滾動報酬模擬**「歷史上每一天單筆買進、並死抱活抱剛好滿 N 年後賣出」**的所有平行宇宙結果，能消除挑時間進場的運氣成分。
+            * **勝率（正報酬機率）**：在歷史上所有持有滿 N 年的進場時機中，**最終賣出是賺錢（報酬率 > 0%）的機率**。例如「五年勝率 100%」，代表過去任何一天買進（就算買在最高點），只要抱滿 5 年從未賠錢過。
+            * **高 / 低（極端年化報酬）**：歷史上運氣最好（買在低點）與最差（買在高點）的**年化報酬率 (CAGR)**。若「五年低」仍是正數，代表這檔標的具備極強的長期修復與抗跌能力。
+            """)
+
 
         sel_win = st.radio("📈 選擇滾動報酬走勢週期：", options=list(ROLLING_WINDOWS.keys()), index=1, horizontal=True)
         curve_dict = rolling_curves.get(sel_win, {})
