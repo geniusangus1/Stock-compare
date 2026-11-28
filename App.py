@@ -1,3 +1,4 @@
+from etf_config import ETF_NAMES
 import datetime
 import numpy as np
 import pandas as pd
