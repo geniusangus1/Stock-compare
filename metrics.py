@@ -10,7 +10,7 @@ def fetch_full_history(ticker: str, _v: int = 3) -> pd.Series:
     # 台股 (.TW / .TWO) 在 Yahoo Finance 2015 年以前的早期歷史資料常有配息/分割未對齊的斷層
     # 美股或其他市場則保留自 2000 年起的完整歷史
     is_tw = ticker.endswith(".TW") or ticker.endswith(".TWO")
-    fetch_start = "2014-01-02" if is_tw else "2000-01-01"
+    fetch_start = "2015-01-01" if is_tw else "2000-01-01"
     end_dt = datetime.date.today() + datetime.timedelta(days=1)
 
     try:
