@@ -95,7 +95,7 @@ if st.button("🚀 開始計算與疊圖比較", type="primary", use_container_w
             }
 
 # 4. 視覺化呈現
-def build_chart(df, y_title, bench_label, active_date=None, title=""):
+def build_chart(df, y_title, bench_label, active_date=None):
     fig = go.Figure()
     for col in df.columns:
         line_style = dict(width=2.8, dash="dot", color="#888888") if col == bench_label else dict(width=2.3)
@@ -104,12 +104,15 @@ def build_chart(df, y_title, bench_label, active_date=None, title=""):
     if active_date:
         fig.add_vline(x=active_date, line_width=1.5, line_dash="solid", line_color="#FF4B4B")
     fig.update_layout(
-        title=title, hovermode="x unified", xaxis=dict(title="", fixedrange=True),
+        hovermode="x unified",
+        xaxis=dict(title="", fixedrange=True),
         yaxis=dict(title=y_title, ticksuffix="%", fixedrange=True),
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
-        margin=dict(l=10, r=10, t=45 if title else 35, b=10), height=360
+        legend=dict(orientation="h", yanchor="bottom", y=1.04, xanchor="left", x=0),
+        margin=dict(l=10, r=10, t=20, b=10),
+        height=380
     )
     return fig
+
 
 if st.session_state.calc_results is not None:
     res = st.session_state.calc_results
@@ -173,10 +176,13 @@ if st.session_state.calc_results is not None:
 
         sel_win = st.radio("📈 選擇滾動報酬走勢週期：", options=list(ROLLING_WINDOWS.keys()), index=1, horizontal=True)
         curve_dict = rolling_curves.get(sel_win, {})
-        if curve_dict:
+                if curve_dict:
             df_roll = pd.DataFrame(curve_dict)
             df_roll.index = df_roll.index.strftime("%Y-%m-%d")
             y_lbl = "累計滾動報酬 (%)" if sel_win == "半年 (6M)" else "年化滾動報酬 CAGR (%)"
-            st.plotly_chart(build_chart(df_roll, y_lbl, bench_label, title=f"{sel_win} 滾動報酬率走勢（灰色虛線為基準）"), use_container_width=True, config={"displayModeBar": False})
+            st.subheader(f"📈 {sel_win} 滾動報酬率走勢")
+            st.caption("灰色虛線為大盤基準；線在紅虛線 (0%) 之上代表「N 年前買進、抱到此日賣出」為正報酬。")
+            st.plotly_chart(build_chart(df_roll, y_lbl, bench_label), use_container_width=True, config={"displayModeBar": False})
         else:
             st.info(f"ℹ️ 目前勾選的標的掛牌時間皆未滿 **{sel_win}**，請改選較短週期。")
+
