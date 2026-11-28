@@ -6,43 +6,24 @@ import yfinance as yf
 from etf_config import ROLLING_WINDOWS
 
 @st.cache_data(ttl=3600, show_spinner=False)
-def fetch_full_history(ticker: str, _v: int = 5):
-    is_tw = ticker.endswith(".TW") or ticker.endswith(".TWO")
-    fetch_start = "2015-01-01" if is_tw else "2000-01-01"
+def fetch_full_history(ticker: str) -> pd.Series:
+    # 改用明確的 start 日期取代 period="max"，避免 Yahoo API 出現 query exceeds 1000 bytes 錯誤
     end_dt = datetime.date.today() + datetime.timedelta(days=1)
-
     try:
         t_obj = yf.Ticker(ticker)
-        data_adj = t_obj.history(start=fetch_start, end=end_dt.strftime("%Y-%m-%d"), auto_adjust=True)
-        data_raw = t_obj.history(start=fetch_start, end=end_dt.strftime("%Y-%m-%d"), auto_adjust=False)
+        data = t_obj.history(start="2000-01-01", end=end_dt.strftime("%Y-%m-%d"), auto_adjust=True)
     except Exception:
-        return pd.Series(dtype=float), pd.DataFrame()
+        return pd.Series(dtype=float)
 
-    if data_adj is None or data_adj.empty or "Close" not in data_adj.columns:
-        return pd.Series(dtype=float), pd.DataFrame()
+    if data is None or data.empty or "Close" not in data.columns:
+        return pd.Series(dtype=float)
 
-    series_close = data_adj["Close"].squeeze().dropna()
+    series_close = data["Close"].squeeze().dropna()
     if series_close.empty:
-        return pd.Series(dtype=float), pd.DataFrame()
+        return pd.Series(dtype=float)
 
     series_close.index = pd.to_datetime(series_close.index).tz_localize(None)
-
-    # 🛡️ 透過 20 日滾動中位數比值，精準攔截分割未對齊或除息跳空異常區間
-    rolling_med = series_close.rolling(window=20, min_periods=1).median()
-    ratio = series_close / rolling_med
-    anomalies = series_close[(ratio > 1.35) | (ratio < 0.65)]
-    if not anomalies.empty:
-        last_anomaly_date = anomalies.index[-1]
-        cleaned = series_close.loc[series_close.index > last_anomaly_date]
-        if len(cleaned) > 10:
-            series_close = cleaned
-
-    div_df = pd.DataFrame()
-    if data_raw is not None and not data_raw.empty and "Dividends" in data_raw.columns:
-        div_df = data_raw[["Close", "Dividends"]].copy()
-        div_df.index = pd.to_datetime(div_df.index).tz_localize(None)
-
-    return series_close, div_df
+    return series_close
 
 
 def calc_rolling_stats(full_series: pd.Series, display_name: str, rolling_curves: dict) -> dict:
