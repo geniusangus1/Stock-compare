@@ -176,7 +176,7 @@ if st.session_state.calc_results is not None:
 
         sel_win = st.radio("📈 選擇滾動報酬走勢週期：", options=list(ROLLING_WINDOWS.keys()), index=1, horizontal=True)
         curve_dict = rolling_curves.get(sel_win, {})
-                if curve_dict:
+        if curve_dict:
             df_roll = pd.DataFrame(curve_dict)
             df_roll.index = df_roll.index.strftime("%Y-%m-%d")
             y_lbl = "累計滾動報酬 (%)" if sel_win == "半年 (6M)" else "年化滾動報酬 CAGR (%)"
