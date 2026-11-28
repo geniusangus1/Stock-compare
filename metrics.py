@@ -7,7 +7,6 @@ from etf_config import ROLLING_WINDOWS
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def fetch_full_history(ticker: str) -> pd.Series:
-    # 改用明確的 start 日期取代 period="max"，避免 Yahoo API 出現 query exceeds 1000 bytes 錯誤
     end_dt = datetime.date.today() + datetime.timedelta(days=1)
     try:
         t_obj = yf.Ticker(ticker)
@@ -23,7 +22,19 @@ def fetch_full_history(ticker: str) -> pd.Series:
         return pd.Series(dtype=float)
 
     series_close.index = pd.to_datetime(series_close.index).tz_localize(None)
+
+    # 🛡️ 自動偵測並過濾 Yahoo Finance 早期除息/分割異常斷層（單日跳動 > 25% 視為資料異常）
+    daily_pct = series_close.pct_change().abs()
+    anomalies = daily_pct[daily_pct > 0.25]
+    if not anomalies.empty:
+        last_anomaly_date = anomalies.index[-1]
+        cleaned = series_close.loc[series_close.index > last_anomaly_date]
+        # 確保截斷後的有效連續資料足夠才套用
+        if len(cleaned) > 10:
+            series_close = cleaned
+
     return series_close
+
 
 def calc_rolling_stats(full_series: pd.Series, display_name: str, rolling_curves: dict) -> dict:
     roll_row = {
