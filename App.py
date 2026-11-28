@@ -159,7 +159,7 @@ if st.session_state.calc_results is not None:
 
     if not df_rolling_stats.empty:
         st.divider()
-                st.subheader("🔄 歷史滾動報酬與正報酬勝率（上市以來完整統計）")
+        st.subheader("🔄 歷史滾動報酬與正報酬勝率（上市以來完整統計）")
         st.caption("💡 半年為累計報酬；1年/3年/5年為年化報酬 (CAGR)。`^TWII` 為不含息指數，含息基準請選 `0050.TW`。")
         st.dataframe(df_rolling_stats, use_container_width=True, hide_index=True)
 
